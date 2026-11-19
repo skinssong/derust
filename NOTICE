@@ -1,10 +1,10 @@
 Derust is derived from Code Explainer Story by trancedu:
 https://github.com/trancedu/code-explainer-story
 
-Code Explainer Story is licensed under the MIT License. Its LICENSE file is
-preserved in this repository. The upstream implementation is kept under
-upstream/ for reference; the Derust pipeline, panel and data contract are
-new work. This is a code-lineage credit, not a claim of design inspiration.
+Code Explainer Story is licensed under the MIT License. Its copyright and
+permission notice is preserved in this repository. The Derust pipeline, panel
+and data contract are new work. This is a code-lineage credit, not a claim of
+design inspiration.
 
 Design inspiration and prior art:
 

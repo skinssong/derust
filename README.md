@@ -183,7 +183,7 @@ Release artifacts are written to `release/`.
 
 Derust began as a fork of
 [Code Explainer Story](https://github.com/trancedu/code-explainer-story) (MIT);
-the upstream shell is preserved under `upstream/`. The ownership timeline is
+the upstream project is credited in `NOTICE`. The ownership timeline is
 inspired by [RustViz](https://github.com/rustviz/rustviz), and the stack/heap
 snapshot by [Aquascope](https://github.com/cognitive-engineering-lab/aquascope).
 Neither project is affiliated with or endorses Derust. See `NOTICE` for the
