@@ -32,6 +32,10 @@ regenerated.
 
 ## Preview
 
+![Derust Read & Analyze workflow: Overview, Spotlights, Ownership](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/analyze.gif)
+
+*Read & Analyze a single file: the module reading opens in Overview, then Spotlights and Ownership fill from the same file analysis.*
+
 ![Derust Overview with the module reading beside agent.rs](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/overview.png)
 
 *Overview: module role, purpose, key operations, and key-function walkthroughs, anchored to the source.*
