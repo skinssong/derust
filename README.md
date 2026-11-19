@@ -30,6 +30,20 @@ module reading first, then the Spotlights and Ownership analysis. The two
 artifacts have separate caches, so one can be reused while the other is
 regenerated.
 
+## Preview
+
+![Derust Overview with the module reading beside agent.rs](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/overview.png)
+
+*Overview: module role, purpose, key operations, and key-function walkthroughs, anchored to the source.*
+
+![Derust Spotlights with Rust construct explanations](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/spotlights.png)
+
+*Spotlights: the Rust constructs that are easy to misread, with meaning, expansion, and the common trap.*
+
+![Derust Ownership timeline and stack/heap snapshot](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/ownership.png)
+
+*Ownership: memory records for key functions, lifetime lanes, events, and a stack/heap snapshot at the current line.*
+
 ## Install
 
 From the Marketplace, search for **Derust**, or install the local VSIX:
