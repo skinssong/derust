@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Derust panel preview</title>
+<style>
+  :root {
+    --vscode-editor-background: #f2f3ed;
+    --vscode-foreground: #1e2320;
+    --vscode-descriptionForeground: #5f685f;
+    --vscode-panel-border: #cbcfc3;
+    --vscode-textLink-foreground: #a8431f;
+    --vscode-editor-findMatchHighlightBackground: #f4e4da;
+    --vscode-textCodeBlock-background: #e8eae0;
+    --vscode-list-hoverBackground: #f6efe5;
+    --vscode-editorWarning-foreground: #9a6a00;
+    --vscode-errorForeground: #b00020;
+    --vscode-focusBorder: #a8431f;
+    --vscode-editor-font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    --vscode-button-secondaryBackground: #e8eae0;
+    --vscode-button-secondaryForeground: #1e2320;
+    --vscode-button-secondaryHoverBackground: #dde0d6;
+  }
+</style>
+<link rel="stylesheet" href="panel.css?v=15" />
+</head>
+<body>
+<div id="app"></div>
+<script>
+  window.acquireVsCodeApi = function () {
+    return {
+      postMessage: function (message) {
+        if (message && message.type !== 'ready') {
+          console.log('POST', message.type, message.start || '', message.end || '');
+        }
+      }
+    };
+  };
+</script>
+<script src="preview-data.js?v=8"></script>
+<script src="preview-overview.js?v=1"></script>
+<script src="preview-brief.js?v=1"></script>
+<script src="panel.js?v=19"></script>
+<script>
+  setTimeout(function () {
+    var overviewOnly = window.location.search.indexOf('overviewOnly') !== -1;
+    var withBrief = window.location.search.indexOf('brief=1') !== -1;
+    if (overviewOnly) {
+      window.postMessage({
+        type: 'overview',
+        payload: {
+          file: 'harness/src/agent.rs',
+          overview: window.PREVIEW_OVERVIEW
+        }
+      }, '*');
+      window.postMessage({ type: 'status', state: 'ready', message: 'Overview from source. Analyze for spotlights, ownership and constraints.' }, '*');
+    } else {
+      window.postMessage({
+        type: 'analysis',
+        payload: {
+          file: 'harness/src/agent.rs',
+          analysis: window.PREVIEW_ANALYSIS,
+          overview: window.PREVIEW_OVERVIEW,
+          layout: 'cards',
+          meta: { model: 'deepseek-v4.1-flash', usage: { input: 6047, output: 8642 }, issues: [] }
+        }
+      }, '*');
+      window.postMessage({ type: 'status', state: 'ready', message: 'Ready. 2 events dropped by validation.' }, '*');
+    }
+    if (withBrief) {
+      window.postMessage({
+        type: 'brief',
+        payload: {
+          file: 'harness/src/agent.rs',
+          brief: window.PREVIEW_BRIEF,
+          stale: false,
+          meta: { model: 'deepseek-v4.1-flash', usage: { input: 6392, output: 4404 } }
+        }
+      }, '*');
+    }
+    window.postMessage({ type: 'cursor', line: 130 }, '*');
+  }, 50);
+</script>
+</body>
+</html>

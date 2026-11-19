@@ -1,635 +1,1396 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { buildChunks } from './analysis/Chunker';
-import { effectiveMaxChunkLines } from './analysis/chunkLimits';
-import { resolveExplanationAnchorLine } from './analysis/explanationAnchors';
-import { renderExplanation, renderPendingExplanation } from './analysis/postProcess';
+import { analyzeSource, SourceMeta } from './analyzer';
 import {
-  getActiveModel,
-  getActiveModelPresets,
-  getCodeExplainerConfig,
-  setExplanationLevel,
-  setInlineEnabled,
-  setModel,
-  setReviewEnabled,
-  setSyncLineOffset
-} from './config';
-import { AnthropicClient } from './anthropic/AnthropicClient';
-import { clearApiKey, resolveApiKey, storeApiKey } from './devEnv';
-import { providerDisplayName, providerForModel } from './llm/modelRouting';
-import { InlineExplanationController } from './inline/InlineExplanationController';
-import { buildFollowUpUserPrompt } from './llm/followUpPrompt';
-import { followUpSystemPrompt } from './llm/prompt';
-import { OpenAIClient } from './openai/OpenAIClient';
-import {
-  readSnapshot,
-  renderedFromSnapshot,
-  snapshotMatches,
-  writeSnapshot
-} from './persistence/snapshots';
-import { ExplanationDocumentProvider } from './providers/ExplanationDocumentProvider';
-import { DiagnosticsController } from './review/DiagnosticsController';
-import { ExplanationStore, StoredExplanation, hashText } from './state/ExplanationStore';
-import { ExplanationChunk, ExplanationLevel, FilePayload, LLMProvider } from './types';
-import { mapSyncTargetLine } from './sync/lineMapping';
-import { matchesAnyGlob } from './path/globs';
-import { StatusBarController } from './ui/StatusBarController';
-import {
-  ExplanationWebviewCommand,
-  ExplanationWebviewPanel,
-  FollowUpFocus,
-  getEditorMetrics
-} from './webview/ExplanationWebviewPanel';
+  BRIEF_PROMPT_VERSION,
+  BRIEF_SYSTEM_PROMPT,
+  BriefSourceMeta,
+  buildBriefUserPrompt,
+  formatModuleContext,
+  parseBriefJson,
+  validateBrief
+} from './brief';
+import { BriefCache } from './briefCache';
+import { AnalysisCache } from './cache';
+import { Analysis, CachedAnalysis, CachedBrief } from './contract';
+import { getConfig, importProviderSettings, messageOf, resolveApiKey } from './config';
+import { IndexService } from './indexService';
+import { OverviewLens, OverviewService } from './overviewLens';
+import { buildProfileCandidates } from './profile';
+import { ReaderPanel } from './panel';
+import { crateRoot, readCrateName } from './project';
+import { completeJson, ProviderSettings } from './provider';
+import { PROMPT_VERSION } from './schema';
 
-let store: ExplanationStore;
-let provider: ExplanationDocumentProvider;
-let diagnosticsController: DiagnosticsController;
-let statusBarController: StatusBarController;
-let inlineController: InlineExplanationController;
-let activeExplanationPanel: ExplanationWebviewPanel | undefined;
-let activeSourceEditor: vscode.TextEditor | undefined;
-let sourceScrollDebounce: NodeJS.Timeout | undefined;
-let ignoreSourceScrollUntil = 0;
-let ignoreWebviewScrollUntil = 0;
-let activeSourceLine: number | undefined;
-const staleSavePromptInFlight = new Set<string>();
+type Current = {
+  uri: vscode.Uri;
+  analysis: Analysis;
+  sourceHash: string;
+  model: string;
+};
+
+type AnalyzeOptions = {
+  force: boolean;
+  showPanel: boolean;
+  progress?: boolean;
+  signal?: AbortSignal;
+};
+
+let contextRef: vscode.ExtensionContext;
+let cache: AnalysisCache;
+let briefCache: BriefCache;
+let panel: ReaderPanel | undefined;
+let panelUri: vscode.Uri | undefined;
+let current: Current | undefined;
+let overviewLens: OverviewLens | undefined;
+let indexService: IndexService;
+let briefController: AbortController | undefined;
+let briefTarget: string | undefined;
+const overviewService = new OverviewService();
+let activeDecoration: vscode.TextEditorDecorationType;
+let pinnedDecoration: vscode.TextEditorDecorationType;
+let selectionTimer: NodeJS.Timeout | undefined;
+let changeTimer: NodeJS.Timeout | undefined;
+let visibleRangesTimer: NodeJS.Timeout | undefined;
+let restoreTimer: NodeJS.Timeout | undefined;
+let ignoreEditorScrollUntil = 0;
+let output: vscode.OutputChannel;
+const LAST_FILE_KEY = 'derust.lastFile';
+// Keep in sync with MEMORY_COLORS in media/panel.js.
+const MEMORY_COLORS = [
+  '#3f7f9f',
+  '#b4652f',
+  '#6c7d3d',
+  '#7a5aa0',
+  '#a34c4c',
+  '#3f7f6f',
+  '#8a6a2f',
+  '#5a6a7a',
+  '#8a5a7a',
+  '#2f6a6a'
+];
+let valueDecorations: vscode.TextEditorDecorationType[] = [];
 
 export function activate(context: vscode.ExtensionContext): void {
-  extensionUri = context.extensionUri;
-  store = new ExplanationStore();
-  provider = new ExplanationDocumentProvider(store);
-  diagnosticsController = new DiagnosticsController();
-  statusBarController = new StatusBarController(getCodeExplainerConfig());
-  inlineController = new InlineExplanationController(store, getCodeExplainerConfig);
+  contextRef = context;
+  cache = new AnalysisCache(context);
+  briefCache = new BriefCache(context);
+  output = vscode.window.createOutputChannel('Derust');
+  overviewLens = new OverviewLens();
+  indexService = new IndexService(context, overviewService, output);
+
+  activeDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+    borderColor: new vscode.ThemeColor('editor.findMatchBorder'),
+    borderWidth: '1px',
+    borderStyle: 'solid'
+  });
+  pinnedDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: new vscode.ThemeColor('editor.selectionHighlightBackground')
+  });
+  valueDecorations = MEMORY_COLORS.map((color) =>
+    vscode.window.createTextEditorDecorationType({ color })
+  );
 
   context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider('code-explainer', provider),
-    vscode.languages.registerHoverProvider({ scheme: 'file' }, inlineController),
-    diagnosticsController,
-    statusBarController,
-    inlineController,
-    vscode.commands.registerCommand('codeExplainer.explainCurrentFile', (uri?: vscode.Uri) => explainCurrentFile(context, false, uri)),
-    vscode.commands.registerCommand('codeExplainer.refreshExplanation', () => explainCurrentFile(context, true)),
-    vscode.commands.registerCommand('codeExplainer.setModel', chooseModel),
-    vscode.commands.registerCommand('codeExplainer.setExplanationLevel', chooseExplanationLevel),
-    vscode.commands.registerCommand('codeExplainer.toggleInlineExplanations', toggleInlineExplanations),
-    vscode.commands.registerCommand('codeExplainer.toggleReviewMode', toggleReviewMode),
-    vscode.commands.registerCommand('codeExplainer.clearCache', clearCache),
-    vscode.commands.registerCommand('codeExplainer.saveCurrentExplanation', saveCurrentExplanation),
-    vscode.commands.registerCommand('codeExplainer.explainFolder', () => explainFolder(context)),
-    vscode.commands.registerCommand('codeExplainer.explainWorkspace', () => explainWorkspace(context)),
-    vscode.commands.registerCommand('codeExplainer.increaseSyncOffset', () => adjustSyncOffset(1)),
-    vscode.commands.registerCommand('codeExplainer.decreaseSyncOffset', () => adjustSyncOffset(-1)),
-    vscode.commands.registerCommand('codeExplainer.resetSyncOffset', () => resetSyncOffset()),
-    vscode.commands.registerCommand('codeExplainer.setOpenAIKey', () => promptForApiKey(context, 'openai')),
-    vscode.commands.registerCommand('codeExplainer.clearOpenAIKey', () => clearStoredApiKey(context, 'openai')),
-    vscode.commands.registerCommand('codeExplainer.setAnthropicKey', () => promptForApiKey(context, 'anthropic')),
-    vscode.commands.registerCommand('codeExplainer.clearAnthropicKey', () => clearStoredApiKey(context, 'anthropic')),
-    vscode.workspace.onDidChangeTextDocument((event) => markStaleIfExplained(event.document)),
-    vscode.workspace.onDidSaveTextDocument((document) => void handleSavedDocument(context, document)),
-    vscode.window.onDidChangeTextEditorVisibleRanges((event) => handleSourceVisibleRangesChanged(event)),
-    vscode.window.onDidChangeTextEditorSelection((event) => handleSourceSelectionChanged(event)),
-    vscode.window.onDidChangeVisibleTextEditors(() => inlineController.updateVisibleEditors()),
+    output,
+    activeDecoration,
+    pinnedDecoration,
+    ...valueDecorations,
+    overviewLens,
+    vscode.commands.registerCommand('derust.analyzeFile', (uri?: vscode.Uri) => analyzeFile(uri)),
+    vscode.commands.registerCommand('derust.analyzePath', (uri?: vscode.Uri) => analyzePath(uri)),
+    vscode.commands.registerCommand('derust.analyzeWorkspace', () => analyzeWorkspace()),
+    vscode.commands.registerCommand('derust.openPanel', () => openPanel()),
+    vscode.commands.registerCommand('derust.showOverview', (uri?: vscode.Uri) => showOverview(uri)),
+    vscode.commands.registerCommand('derust.rebuildIndex', () => rebuildIndex()),
+    vscode.commands.registerCommand('derust.showIndexPacket', () => showIndexPacket()),
+    vscode.commands.registerCommand('derust.importEnv', () => importProviderSettings(context)),
+    vscode.commands.registerCommand('derust.clearCache', () => clearCache()),
+    vscode.window.onDidChangeTextEditorSelection((event) => handleSelection(event)),
+    vscode.window.onDidChangeTextEditorVisibleRanges((event) => handleVisibleRanges(event)),
+    vscode.workspace.onDidChangeTextDocument((event) => handleDocumentChanged(event)),
+    vscode.window.onDidChangeActiveTextEditor((editor) => handleActiveEditor(editor)),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('codeExplainer')) {
-        refreshSettingsDisplay();
+      if (event.affectsConfiguration('derust.overviewGlance')) {
+        overviewLens?.refresh();
       }
     })
   );
+
+  void restoreLastAnalysis(context, false);
+  restoreTimer = setTimeout(() => {
+    if (!panel && !current) {
+      void restoreLastAnalysis(context, false);
+    }
+  }, 2000);
 }
 
 export function deactivate(): void {
-  diagnosticsController?.dispose();
-  statusBarController?.dispose();
-  inlineController?.dispose();
-  activeExplanationPanel?.dispose();
+  briefController?.abort();
+  if (selectionTimer) {
+    clearTimeout(selectionTimer);
+  }
+  if (changeTimer) {
+    clearTimeout(changeTimer);
+  }
+  if (visibleRangesTimer) {
+    clearTimeout(visibleRangesTimer);
+  }
+  if (restoreTimer) {
+    clearTimeout(restoreTimer);
+  }
+  panel?.dispose();
 }
 
-async function explainCurrentFile(context: vscode.ExtensionContext, forceRefresh = false, fileUri?: vscode.Uri): Promise<void> {
-  let editor: vscode.TextEditor | undefined;
+async function analyzeFile(uri?: vscode.Uri): Promise<void> {
+  if (!uri) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'rust') {
+      vscode.window.showInformationMessage('Derust: open a Rust file first.');
+      return;
+    }
+    uri = editor.document.uri;
+  }
 
-  if (fileUri && fileUri.scheme === 'file') {
-    const document = await vscode.workspace.openTextDocument(fileUri);
-    editor = await vscode.window.showTextDocument(document, { preview: false });
+  if (!uri.path.endsWith('.rs')) {
+    vscode.window.showInformationMessage('Derust: only .rs files are supported.');
+    return;
+  }
+
+  await readAndAnalyzeFile(uri, false);
+}
+
+async function analyzePath(initial?: vscode.Uri): Promise<void> {
+  let target = initial;
+
+  if (!target) {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    const value = await vscode.window.showInputBox({
+      title: 'Analyze a Rust file or folder',
+      prompt: 'Workspace-relative path, or an absolute path',
+      value: '',
+      ignoreFocusOut: true
+    });
+
+    if (!value?.trim()) {
+      return;
+    }
+
+    target = path.isAbsolute(value.trim())
+      ? vscode.Uri.file(value.trim())
+      : root
+        ? vscode.Uri.joinPath(root, value.trim())
+        : vscode.Uri.file(value.trim());
+  }
+
+  const targetUri = target;
+
+  let stat: vscode.FileStat;
+  try {
+    stat = await vscode.workspace.fs.stat(targetUri);
+  } catch {
+    vscode.window.showErrorMessage(`Derust: ${vscode.workspace.asRelativePath(targetUri, false)} was not found.`);
+    return;
+  }
+
+  if ((stat.type & vscode.FileType.Directory) !== 0) {
+    const uris = await findRustFiles(targetUri);
+    await chooseAndAnalyze(uris);
+    return;
+  }
+
+  if (!targetUri.path.endsWith('.rs')) {
+    vscode.window.showInformationMessage('Derust: only .rs files are supported.');
+    return;
+  }
+
+  await readAndAnalyzeFile(targetUri, false);
+}
+
+async function analyzeWorkspace(): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!root) {
+    vscode.window.showInformationMessage('Derust: open a workspace first.');
+    return;
+  }
+
+  const uris = await findRustFiles(root);
+  await chooseAndAnalyze(uris);
+}
+
+async function openPanel(): Promise<void> {
+  if (panel?.isDisposed) {
+    panel = undefined;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+
+  if (editor && editor.document.languageId === 'rust') {
+    const uri = editor.document.uri;
+
+    if (panel && panelUri?.toString() === uri.toString()) {
+      panel.reveal();
+      return;
+    }
+
+    try {
+      const hit = await readCachedForUri(uri);
+      if (hit) {
+        await showAnalysis(uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+      } else {
+        await showStructuralOverview(uri, true);
+      }
+      return;
+    } catch (error) {
+      output.appendLine(`[open] ${messageOf(error)}`);
+    }
+
+    await showStructuralOverview(uri, true);
+    return;
+  }
+
+  if (panel) {
+    panel.reveal();
+    return;
+  }
+
+  if (current) {
+    try {
+      const hit = await readCachedForUri(current.uri);
+      if (hit) {
+        await showAnalysis(current.uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+        return;
+      }
+    } catch (error) {
+      output.appendLine(`[open] ${messageOf(error)}`);
+    }
+  }
+
+  if (await restoreLastAnalysis(contextRef, true)) {
+    return;
+  }
+
+  vscode.window.showInformationMessage('Derust: open a Rust file first.');
+}
+
+async function showOverview(uri?: vscode.Uri): Promise<void> {
+  if (!uri) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'rust') {
+      vscode.window.showInformationMessage('Derust: open a Rust file first.');
+      return;
+    }
+    uri = editor.document.uri;
+  }
+
+  if (!uri.path.endsWith('.rs')) {
+    vscode.window.showInformationMessage('Derust: only .rs files are supported.');
+    return;
+  }
+
+  try {
+    const hit = await readCachedForUri(uri);
+    if (hit) {
+      await showAnalysis(uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+    } else {
+      await showStructuralOverview(uri, true);
+    }
+  } catch (error) {
+    output.appendLine(`[overview] ${messageOf(error)}`);
+    await showStructuralOverview(uri, true);
+  }
+
+  panel?.focusLens('overview');
+
+  const config = getConfig();
+  if (config.briefOnOverview && config.baseUrl && config.model) {
+    void explainFile(uri, false);
+  }
+}
+
+async function showStructuralOverview(uri: vscode.Uri, reveal: boolean): Promise<void> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const overview = await overviewService.build(document);
+
+  if (
+    !reveal &&
+    vscode.window.activeTextEditor?.document.uri.toString() !== uri.toString()
+  ) {
+    return;
+  }
+
+  if (panelUri && panelUri.toString() !== uri.toString()) {
+    cancelBrief();
+  }
+
+  const fileLabel = vscode.workspace.asRelativePath(uri, false);
+  const target = ensurePanel(uri);
+
+  panelUri = uri;
+  if (current && current.uri.toString() !== uri.toString()) {
+    current = undefined;
+    clearDecorations();
+  }
+
+  target.setSource(uri);
+  await contextRef.workspaceState.update(LAST_FILE_KEY, uri.toString());
+  target.updateOverview({ file: fileLabel, overview });
+
+  const sourceHash = cache.sourceHash(document.getText());
+  const analysisIsStale =
+    current !== undefined &&
+    current.uri.toString() === uri.toString() &&
+    current.sourceHash !== sourceHash;
+
+  target.setStatus(
+    analysisIsStale ? 'stale' : 'ready',
+    analysisIsStale
+      ? 'Overview is current. The analysis is stale; analyze again to refresh the other tabs.'
+      : 'Overview from source. Read & Analyze builds the module reading, spotlights and ownership.'
+  );
+  if (reveal) {
+    target.reveal();
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (editor && editor.document.uri.toString() === uri.toString()) {
+    target.setCursor(editor.selection.active.line + 1);
+  }
+
+  if (current && !analysisIsStale) {
+    applyValueColors();
   } else {
-    editor = getTargetSourceEditor();
+    clearValueColors();
   }
 
-  if (!editor || editor.document.uri.scheme !== 'file') {
-    vscode.window.showWarningMessage('Open a file-backed code editor before running Code Explainer.');
+  void attachBrief(uri, fileLabel, sourceHash);
+}
+
+function cancelBrief(): void {
+  briefController?.abort();
+  briefController = undefined;
+  briefTarget = undefined;
+}
+
+async function attachBrief(
+  uri: vscode.Uri,
+  fileLabel: string,
+  sourceHash: string
+): Promise<void> {
+  if (!panel || panelUri?.toString() !== uri.toString() || briefTarget === uri.toString()) {
     return;
   }
 
-  const document = editor.document;
-  let config = getCodeExplainerConfig();
-
-  if (isExcluded(document.uri, config.excludedGlobs)) {
-    vscode.window.showWarningMessage('This file matches Code Explainer excludedGlobs.');
+  const config = getConfig();
+  if (!config.model) {
+    panel.updateBrief({ file: fileLabel });
     return;
   }
 
-  if (document.lineCount > config.maxFileLines) {
-    vscode.window.showWarningMessage(
-      `This file has ${document.lineCount} lines, above codeExplainer.maxFileLines (${config.maxFileLines}). Select a smaller file or raise the limit.`
+  let contextRevision = '';
+  try {
+    contextRevision = (await indexService.currentRevision(uri)) ?? '';
+  } catch (error) {
+    output.appendLine(`[index] ${fileLabel}: ${messageOf(error)}`);
+  }
+  const exact = await briefCache.read(
+    briefCache.key(fileLabel, sourceHash, config.model, contextRevision)
+  );
+  if (!panel || panelUri?.toString() !== uri.toString()) {
+    return;
+  }
+
+  if (exact && exact.sourceHash === sourceHash) {
+    panel.updateBrief({
+      file: fileLabel,
+      brief: exact.brief,
+      stale: false,
+      meta: {
+        model: exact.model,
+        generatedAt: exact.generatedAt,
+        usage: exact.usage
+      }
+    });
+    return;
+  }
+
+  const latest = await briefCache.readLatestForFile(fileLabel, config.model, sourceHash, uri.toString());
+  if (!panel || panelUri?.toString() !== uri.toString()) {
+    return;
+  }
+
+  if (latest) {
+    panel.updateBrief({
+      file: fileLabel,
+      brief: latest.brief,
+      stale:
+        latest.sourceHash !== sourceHash ||
+        latest.promptVersion !== BRIEF_PROMPT_VERSION ||
+        (latest.contextRevision ?? '') !== contextRevision,
+      meta: {
+        model: latest.model,
+        generatedAt: latest.generatedAt,
+        usage: latest.usage
+      }
+    });
+  } else {
+    panel.updateBrief({ file: fileLabel });
+  }
+}
+
+async function showIndexPacket(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'rust') {
+    vscode.window.showInformationMessage('Derust: open a Rust file first.');
+    return;
+  }
+
+  try {
+    const packet = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Derust — index packet',
+        cancellable: false
+      },
+      async (progress) => {
+        progress.report({ message: 'Reading workspace index…' });
+        return indexService.getPacket(editor.document.uri);
+      }
     );
+
+    if (!packet) {
+      vscode.window.showInformationMessage('Derust: no index packet for this file.');
+      return;
+    }
+
+    const cachePath = indexService.cachePathFor(editor.document.uri);
+    const content = [
+      '# Derust — index packet',
+      '',
+      `File: ${packet.file}`,
+      `Revision: ${packet.revision}`,
+      ...(cachePath ? [`Cache: ${cachePath}`] : []),
+      '',
+      formatModuleContext(packet)
+    ].join('\n');
+
+    const document = await vscode.workspace.openTextDocument({
+      language: 'markdown',
+      content
+    });
+    await vscode.window.showTextDocument(document, {
+      viewColumn: vscode.ViewColumn.Beside,
+      preserveFocus: false
+    });
+  } catch (error) {
+    vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+  }
+}
+
+async function rebuildIndex(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'rust') {
+    vscode.window.showInformationMessage('Derust: open a Rust file first.');
     return;
   }
 
-  const setup = await ensureModelAndApiKey(context);
-  if (!setup) {
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Derust — workspace index',
+        cancellable: false
+      },
+      async (progress) => {
+        progress.report({ message: 'Rebuilding…' });
+        await indexService.rebuild(editor.document.uri);
+      }
+    );
+    vscode.window.showInformationMessage('Derust: workspace index rebuilt.');
+  } catch (error) {
+    vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+  }
+}
+
+async function explainFile(uri: vscode.Uri, force: boolean): Promise<void> {
+  if (!panel) {
     return;
   }
-  config = setup.config;
+  if (!force && briefTarget === uri.toString() && briefController) {
+    return;
+  }
 
-  const content = document.getText();
-  const contentHash = hashText(content);
-  const activeModel = setup.activeModel;
-  const apiKey = setup.apiKey;
-  const requestKey = {
-    sourceUri: document.uri.toString(),
-    documentVersion: document.version,
-    contentHash,
-    provider: config.provider,
-    level: config.explanationLevel,
-    reviewEnabled: config.reviewEnabled,
-    model: activeModel
-  };
+  const config = getConfig();
+  const document = await vscode.workspace.openTextDocument(uri);
+  const fileLabel = vscode.workspace.asRelativePath(uri, false);
+  const source = document.getText();
+  const sourceHash = cache.sourceHash(source);
 
-  if (!forceRefresh && config.cacheExplanations) {
-    const cached = store.getBySource(document.uri);
+  // Hide the primary action before the index build, not only before the
+  // provider call. Otherwise the button stays active for the whole index wait.
+  cancelBrief();
+  const controller = new AbortController();
+  briefController = controller;
+  briefTarget = uri.toString();
+  panel.updateBrief({ file: fileLabel, loading: true });
+  panel.setStatus('loading', 'Building workspace index…');
+
+  let moduleContext;
+  try {
+    moduleContext = await indexService.getPacket(uri);
+  } catch (error) {
+    output.appendLine(`[index] ${fileLabel}: ${messageOf(error)}`);
+  }
+  if (panelUri?.toString() !== uri.toString()) {
+    if (briefController === controller) {
+      briefController = undefined;
+      briefTarget = undefined;
+    }
+    return;
+  }
+  const candidates = moduleContext
+    ? buildProfileCandidates(moduleContext, source)
+    : undefined;
+  const contextRevision = moduleContext?.revision ?? '';
+  const key = config.model
+    ? briefCache.key(fileLabel, sourceHash, config.model, contextRevision)
+    : '';
+
+  if (!force && key) {
+    const hit = await briefCache.read(key);
+    if (hit) {
+      if (briefController === controller) {
+        briefController = undefined;
+        briefTarget = undefined;
+      }
+      panel.updateBrief({
+        file: fileLabel,
+        brief: hit.brief,
+        stale: false,
+        loading: false,
+        meta: {
+          model: hit.model,
+          generatedAt: hit.generatedAt,
+          usage: hit.usage
+        }
+      });
+      panel.setStatus('ready', 'Module reading loaded from cache.');
+      return;
+    }
+  }
+
+  if (!force && config.model) {
+    const latest = await briefCache.readLatestForFile(fileLabel, config.model, sourceHash, uri.toString());
     if (
-      cached &&
-      cached.key.contentHash === contentHash &&
-      cached.key.provider === config.provider &&
-      cached.key.level === config.explanationLevel &&
-      cached.key.reviewEnabled === config.reviewEnabled &&
-      cached.key.model === activeModel
+      latest &&
+      latest.sourceHash === sourceHash &&
+      latest.promptVersion === BRIEF_PROMPT_VERSION &&
+      (latest.contextRevision ?? '') === contextRevision
     ) {
-      await openExplanation(context, editor, cached);
+      if (briefController === controller) {
+        briefController = undefined;
+        briefTarget = undefined;
+      }
+      panel.updateBrief({
+        file: fileLabel,
+        brief: latest.brief,
+        stale: false,
+        loading: false,
+        meta: {
+          model: latest.model,
+          generatedAt: latest.generatedAt,
+          usage: latest.usage
+        }
+      });
+      panel.setStatus('ready', 'Module reading loaded from cache.');
       return;
     }
   }
 
-  if (!forceRefresh && config.persistExplanations) {
-    const snapshot = await readSnapshot(document.uri, config);
-    if (snapshot && snapshotMatches(snapshot, contentHash, config, document.lineCount)) {
-      const stored = store.put(requestKey, document.uri, renderedFromSnapshot(snapshot), config.cacheExplanations);
-      diagnosticsController.update(document.uri, stored.rendered.reviewItems);
-      inlineController.refresh(document.uri);
-      await openExplanation(context, editor, stored);
+  try {
+    if (!config.baseUrl || !config.model) {
+      throw new Error(
+        'Set derust.baseUrl and derust.model first, or import them with Derust: Import Provider Settings from .env.'
+      );
+    }
+
+    const apiKey = await ensureApiKey();
+    if (!apiKey) {
+      throw new Error('No API key configured. Run Derust: Import Provider Settings from .env.');
+    }
+
+    const overview = await overviewService.build(document);
+    if (panelUri?.toString() !== uri.toString()) {
+      return;
+    }
+
+    const meta: BriefSourceMeta = {
+      file: fileLabel,
+      crateName: await readCrateName(uri),
+      docs: config.includeDocs ? await readProjectDocs(uri) : '',
+      model: config.model,
+      sourceHash,
+      overview,
+      moduleContext,
+      candidates
+    };
+
+    const settings: ProviderSettings = {
+      baseUrl: config.baseUrl,
+      model: config.model,
+      apiKey,
+      jsonMode: config.jsonMode,
+      timeoutMs: config.timeoutSeconds * 1000,
+      maxTokens: Math.min(config.maxOutputTokens, 12000),
+      reasoningEffort: config.reasoningEffort === 'none' ? 'none' : 'low',
+      userAgent: `derust/${contextRef.extension.packageJSON.version}`
+    };
+
+    panel.updateBrief({ file: fileLabel, loading: true });
+    panel.setStatus('loading', `Writing module reading for ${fileLabel}…`);
+
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Derust — ${path.basename(uri.fsPath)}`,
+        cancellable: true
+      },
+      async (progress, token) => {
+        token.onCancellationRequested(() => controller.abort());
+        progress.report({ message: 'Writing module reading…' });
+        return completeJson(
+          BRIEF_SYSTEM_PROMPT,
+          buildBriefUserPrompt(source, meta),
+          settings,
+          controller.signal
+        );
+      }
+    );
+
+    if (controller.signal.aborted) {
+      panel.setStatus('ready', 'Module reading cancelled.');
+      panel.updateBrief({ file: fileLabel, loading: false });
+      return;
+    }
+
+    const parsed = parseBriefJson(result.text);
+    const { brief, issues } = validateBrief(parsed, source, meta);
+    const cached: CachedBrief = {
+      brief,
+      fileKey: uri.toString(),
+      contextRevision,
+      sourceHash,
+      promptVersion: BRIEF_PROMPT_VERSION,
+      model: config.model,
+      generatedAt: new Date().toISOString(),
+      usage: result.usage,
+      issues
+    };
+    brief.generatedAt = cached.generatedAt;
+    await briefCache.write(key, cached);
+
+    const stale = cache.sourceHash(document.getText()) !== sourceHash;
+
+    if (briefTarget === uri.toString() && briefController === controller) {
+      panel.updateBrief({
+        file: fileLabel,
+        brief,
+        stale,
+        meta: {
+          model: config.model,
+          generatedAt: cached.generatedAt,
+          usage: result.usage
+        }
+      });
+      panel.setStatus(
+        'ready',
+        stale
+          ? 'Module reading ready, but the source changed while it was writing. Refresh it to update the line links.'
+          : issues.length > 0
+            ? `Module reading ready. ${issues.length} record${issues.length === 1 ? '' : 's'} dropped by validation.`
+            : 'Module reading ready.'
+      );
+    }
+
+    for (const issue of issues.slice(0, 6)) {
+      output.appendLine(`[brief] ${fileLabel}: ${issue}`);
+    }
+  } catch (error) {
+    const stillCurrent =
+      panelUri?.toString() === uri.toString() && briefController === controller;
+    if (stillCurrent) {
+      if (controller.signal.aborted) {
+        panel.setStatus('ready', 'Module reading cancelled.');
+      } else {
+        panel.setStatus('error', messageOf(error));
+        vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+      }
+      panel.updateBrief({ file: fileLabel, loading: false });
+    }
+    output.appendLine(`[brief] ${fileLabel}: ${messageOf(error)}`);
+  } finally {
+    if (briefController === controller) {
+      briefController = undefined;
+      briefTarget = undefined;
+    }
+  }
+}
+
+async function clearCache(): Promise<void> {
+  briefController?.abort();
+  await Promise.all([cache.clear(), briefCache.clear()]);
+  vscode.window.showInformationMessage('Derust: analysis and module reading caches cleared.');
+}
+
+async function findRustFiles(folder: vscode.Uri): Promise<vscode.Uri[]> {
+  const exclude = '**/{target,.git,node_modules,.code-explainer}/**';
+  const found = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, '**/*.rs'), exclude);
+  return found.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+}
+
+async function chooseAndAnalyze(uris: vscode.Uri[]): Promise<void> {
+  if (uris.length === 0) {
+    vscode.window.showInformationMessage('Derust: no .rs files matched.');
+    return;
+  }
+
+  const items = uris.map((uri) => ({
+    label: vscode.workspace.asRelativePath(uri, false),
+    uri,
+    picked: true
+  }));
+
+  const selected = await vscode.window.showQuickPick(items, {
+    canPickMany: true,
+    title: `Analyze Rust files (${uris.length})`,
+    placeHolder: 'Select files to analyze'
+  });
+
+  if (!selected || selected.length === 0) {
+    return;
+  }
+
+  const config = getConfig();
+  if (selected.length > config.maxFiles) {
+    const answer = await vscode.window.showWarningMessage(
+      `Analyze ${selected.length} files? Each file can take a few minutes and calls the provider.`,
+      { modal: true },
+      'Continue'
+    );
+    if (answer !== 'Continue') {
       return;
     }
   }
+
+  await analyzeMany(selected.map((item) => item.uri));
+}
+
+async function analyzeMany(uris: vscode.Uri[]): Promise<void> {
+  const config = getConfig();
+  const succeeded: vscode.Uri[] = [];
+  const failures: string[] = [];
+  let completed = 0;
+  let cursor = 0;
+  const batchController = new AbortController();
 
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'Code Explainer',
+      title: 'Derust',
       cancellable: true
     },
     async (progress, token) => {
-      progress.report({ message: 'Chunking file...' });
-      const chunkLineLimit = effectiveMaxChunkLines(config.explanationLevel, config.maxChunkLines);
-      const chunks = await buildChunks(document, chunkLineLimit);
-      const payload: FilePayload = {
-        fileName: config.includeFullPath ? document.uri.fsPath : path.basename(document.uri.fsPath),
-        languageId: document.languageId,
-        totalLines: document.lineCount,
-        explanationLevel: config.explanationLevel,
-        reviewEnabled: config.reviewEnabled,
-        chunks
-      };
+      token.onCancellationRequested(() => batchController.abort());
 
-      const abortController = new AbortController();
-      token.onCancellationRequested(() => abortController.abort());
+      const worker = async (): Promise<void> => {
+        while (cursor < uris.length) {
+          if (token.isCancellationRequested) {
+            return;
+          }
 
-      const pending = renderPendingExplanation(document.lineCount, `Generating ${chunks.length} explanation chunks with ${activeModel}...`);
-      const stored = store.put(requestKey, document.uri, pending, false);
-      provider.refresh(stored.explanationUri);
-      await openExplanation(context, editor, stored);
+          const index = cursor;
+          cursor += 1;
+          const uri = uris[index];
 
-      const streamedChunks = new Map<string, ExplanationChunk>();
-      const updateFromChunk = (chunk: ExplanationChunk) => {
-        streamedChunks.set(chunk.id, chunk);
-        const partial = renderExplanation(document.lineCount, {
-          fileSummary: `Generated ${streamedChunks.size} of ${chunks.length} chunks...`,
-          chunks: [...streamedChunks.values()]
-        }, {
-          sourceText: content,
-          languageId: document.languageId,
-          level: config.explanationLevel
-        });
-        store.update(stored.id, partial, false);
-        provider.refresh(stored.explanationUri);
-        activeExplanationPanel?.update(stored, getCodeExplainerConfig(), getEditorMetrics());
-        diagnosticsController.update(document.uri, partial.reviewItems);
-        inlineController.refresh(document.uri);
-        progress.report({ message: `Received ${streamedChunks.size}/${chunks.length} chunks...` });
-      };
-
-      try {
-        progress.report({ message: `Streaming one file-level explanation from ${activeModel}...` });
-        const client = config.provider === 'anthropic' ? new AnthropicClient() : new OpenAIClient();
-        const response = await client.generateExplanationStream(
-          payload,
-          {
-            apiKey,
-            model: activeModel,
-            signal: abortController.signal
-          },
-          updateFromChunk
-        );
-
-        progress.report({ message: 'Finalizing aligned explanation lines...' });
-        const rendered = renderExplanation(document.lineCount, response, {
-          sourceText: content,
-          languageId: document.languageId,
-          level: config.explanationLevel
-        });
-        const finalStored = store.update(stored.id, rendered, config.cacheExplanations);
-        provider.refresh(stored.explanationUri);
-        activeExplanationPanel?.update(stored, getCodeExplainerConfig(), getEditorMetrics());
-        diagnosticsController.update(document.uri, rendered.reviewItems);
-        inlineController.refresh(document.uri);
-        if (finalStored && config.persistExplanations) {
-          await writeSnapshot(finalStored, config, document.languageId, document.lineCount);
+          try {
+            const completed = await analyzeUri(uri, {
+              force: false,
+              showPanel: false,
+              progress: false,
+              signal: batchController.signal
+            });
+            if (completed) {
+              succeeded.push(uri);
+            } else if (!batchController.signal.aborted) {
+              const label = vscode.workspace.asRelativePath(uri, false);
+              failures.push(`${label}: analysis did not complete`);
+            }
+          } catch (error) {
+            if (batchController.signal.aborted) {
+              return;
+            }
+            const label = vscode.workspace.asRelativePath(uri, false);
+            failures.push(`${label}: ${messageOf(error)}`);
+            output.appendLine(`[fail] ${label}: ${messageOf(error)}`);
+          } finally {
+            completed += 1;
+            progress.report({
+              message: `${completed}/${uris.length} — ${vscode.workspace.asRelativePath(uri, false)}`,
+              increment: 100 / uris.length
+            });
+          }
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const failed = renderPendingExplanation(document.lineCount, `Code Explainer failed: ${message}`);
-        store.update(stored.id, failed, false);
-        provider.refresh(stored.explanationUri);
-        activeExplanationPanel?.update(stored, getCodeExplainerConfig(), getEditorMetrics());
-        inlineController.refresh(document.uri);
-        vscode.window.showErrorMessage(`Code Explainer failed: ${message}`);
-      }
+      };
+
+      const workers = Array.from(
+        { length: Math.min(config.concurrency, uris.length) },
+        () => worker()
+      );
+      await Promise.all(workers);
     }
   );
-}
 
-async function openExplanation(
-  context: vscode.ExtensionContext,
-  sourceEditor: vscode.TextEditor,
-  stored: StoredExplanation
-): Promise<void> {
-  activeSourceEditor = sourceEditor;
+  if (batchController.signal.aborted) {
+    vscode.window.showInformationMessage(
+      `Derust: cancelled. Completed ${succeeded.length} file${succeeded.length === 1 ? '' : 's'}${
+        failures.length > 0 ? `, ${failures.length} failed` : ''
+      }.`
+    );
+    return;
+  }
 
-  if (!activeExplanationPanel || !activeExplanationPanel.matchesSource(sourceEditor.document.uri)) {
-    activeExplanationPanel?.dispose();
-    activeExplanationPanel = ExplanationWebviewPanel.create(contextExtensionUri(), sourceEditor.document.uri, {
-      onVisibleLineChanged: (line) => handleWebviewVisibleLineChanged(line),
-      onActiveLineChanged: (line) => handleWebviewActiveLineChanged(line),
-      onCommand: (message) => handleExplanationPanelCommand(message),
-      onAskFollowUp: (focus) => {
-        void handleAskFollowUp(context, focus);
-      },
-      onDispose: () => {
-        activeExplanationPanel = undefined;
-      }
-    });
+  if (succeeded.length > 0) {
+    await analyzeUri(succeeded[0], { force: false, showPanel: true });
+  }
+
+  const summary =
+    failures.length === 0
+      ? `Derust: analyzed ${succeeded.length} file${succeeded.length === 1 ? '' : 's'}.`
+      : `Derust: analyzed ${succeeded.length}, failed ${failures.length}.`;
+
+  if (failures.length > 0) {
+    output.show(true);
+    vscode.window.showWarningMessage(summary);
   } else {
-    activeExplanationPanel.reveal();
+    vscode.window.showInformationMessage(summary);
   }
-
-  activeExplanationPanel.update(stored, getCodeExplainerConfig(), getEditorMetrics());
-  inlineController.refresh(sourceEditor.document.uri);
-  updateActiveLineFromEditor(sourceEditor);
 }
 
-async function chooseModel(): Promise<boolean> {
-  const config = getCodeExplainerConfig();
-  const activeModel = getActiveModel(config);
-  const presetModels = uniqueNonEmpty([activeModel, ...getActiveModelPresets(config)]);
-  const customLabel = 'Custom model id...';
-  const selected = await vscode.window.showQuickPick(
-    [
-      ...presetModels.map((model) => ({
-        label: model,
-        description: model === activeModel ? `current, ${providerDisplayName(providerForModel(model))}` : providerDisplayName(providerForModel(model))
-      })),
-      {
-        label: customLabel,
-        description: 'Enter another model id'
+async function analyzeUri(uri: vscode.Uri, options: AnalyzeOptions): Promise<boolean> {
+  const config = getConfig();
+  const document = await vscode.workspace.openTextDocument(uri);
+
+  if (document.lineCount > config.maxFileLines) {
+    throw new Error(
+      `${vscode.workspace.asRelativePath(uri, false)} has ${document.lineCount} lines; the configured analysis limit is ${config.maxFileLines}. Increase derust.maxFileLines to analyze it.`
+    );
+  }
+
+  const text = document.getText();
+  const fileLabel = vscode.workspace.asRelativePath(uri, false);
+  const docs = config.includeDocs ? await readProjectDocs(uri) : '';
+  const key = cache.key(text, config.model, `${fileLabel}\0${docs}`);
+
+  let cached = options.force ? undefined : await cache.read(key);
+  if (!cached && !options.force) {
+    cached = await cache.readLatestForFile(fileLabel, cache.sourceHash(text), config.model);
+  }
+
+  if (!cached) {
+    if (!config.baseUrl || !config.model) {
+      throw new Error(
+        'Set derust.baseUrl and derust.model first, or import them with Derust: Import Provider Settings from .env.'
+      );
+    }
+
+    const apiKey = await ensureApiKey();
+    if (!apiKey) {
+      throw new Error('No API key configured. Run Derust: Import Provider Settings from .env.');
+    }
+
+    const settings: ProviderSettings = {
+      baseUrl: config.baseUrl,
+      model: config.model,
+      apiKey,
+      jsonMode: config.jsonMode,
+      timeoutMs: config.timeoutSeconds * 1000,
+      maxTokens: config.maxOutputTokens,
+      reasoningEffort: config.reasoningEffort,
+      userAgent: `derust/${contextRef.extension.packageJSON.version}`
+    };
+
+    if (options.showPanel) {
+      const target = ensurePanel(uri);
+      target.setSource(uri);
+      target.setStatus('loading', `Analyzing ${fileLabel}…`);
+      target.reveal();
+    }
+
+    const controller = new AbortController();
+    if (options.signal) {
+      if (options.signal.aborted) {
+        return false;
       }
-    ],
-    {
-      title: 'Code Explainer: Model',
-      placeHolder: 'Choose a model. Claude models use Anthropic; GPT models use OpenAI.'
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
-  );
 
-  if (!selected) {
-    return false;
+    const run = async (): Promise<CachedAnalysis> => {
+      const meta: SourceMeta = {
+        file: fileLabel,
+        crateName: await readCrateName(uri),
+        docs,
+        model: config.model
+      };
+      const result = await analyzeSource(text, meta, settings, controller.signal);
+      const value: CachedAnalysis = {
+        analysis: result.analysis,
+        textHash: key,
+        sourceHash: cache.sourceHash(text),
+        promptVersion: PROMPT_VERSION,
+        model: config.model,
+        generatedAt: new Date().toISOString(),
+        usage: result.usage,
+        issues: result.issues
+      };
+      await cache.write(key, value, result.raw);
+      return value;
+    };
+
+    try {
+      if (options.progress === false) {
+        cached = await run();
+      } else {
+        cached = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Derust — ${path.basename(uri.fsPath)}`,
+            cancellable: true
+          },
+          async (progress, token) => {
+            token.onCancellationRequested(() => controller.abort());
+            progress.report({ message: 'Building context and calling the provider…' });
+            return run();
+          }
+        );
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        if (options.showPanel) {
+          panel?.setStatus('ready', 'Analysis cancelled.');
+        }
+        return false;
+      }
+
+      if (options.showPanel) {
+        panel?.setStatus('error', messageOf(error));
+      }
+      output.appendLine(`[error] ${fileLabel}: ${messageOf(error)}`);
+      throw error;
+    }
   }
 
-  let nextModel = selected.label;
-  if (nextModel === customLabel) {
-    const custom = await vscode.window.showInputBox({
-      title: 'Code Explainer: Custom Model',
-      prompt: 'Enter a model id. Model ids starting with claude use Anthropic; other ids use OpenAI.',
-      value: activeModel,
-      ignoreFocusOut: true,
-      validateInput: (input) => (input.trim() ? undefined : 'Enter a non-empty model id.')
-    });
-    if (!custom) {
-      return false;
-    }
-    nextModel = custom.trim();
+  if (!options.showPanel) {
+    return true;
   }
 
-  await setModel(nextModel);
-  refreshSettingsDisplay();
-  vscode.window.showInformationMessage(`Code Explainer model set to ${nextModel} (${providerDisplayName(providerForModel(nextModel))}).`);
+  await showAnalysis(uri, fileLabel, cached, config.defaultLayout);
   return true;
 }
 
-async function toggleInlineExplanations(): Promise<void> {
-  const config = getCodeExplainerConfig();
-  const nextValue = !config.inlineEnabled;
-  await setInlineEnabled(nextValue);
-  refreshSettingsDisplay();
-  vscode.window.showInformationMessage(`Code Explainer inline explanations ${nextValue ? 'enabled' : 'disabled'}.`);
+async function showAnalysis(
+  uri: vscode.Uri,
+  fileLabel: string,
+  cached: CachedAnalysis,
+  layout: 'cards' | 'columns',
+  reveal = true
+): Promise<void> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const overview = await overviewService.build(document);
+
+  if (
+    !reveal &&
+    vscode.window.activeTextEditor?.document.uri.toString() !== uri.toString()
+  ) {
+    return;
+  }
+
+  if (panelUri && panelUri.toString() !== uri.toString()) {
+    cancelBrief();
+  }
+
+  const target = ensurePanel(uri);
+  const issues = Array.isArray(cached.issues) ? cached.issues : [];
+  const sourceHash = cached.sourceHash || cache.sourceHash(document.getText());
+
+  panelUri = uri;
+  current = {
+    uri,
+    analysis: cached.analysis,
+    sourceHash,
+    model: cached.model
+  };
+
+  target.setSource(uri);
+  void contextRef.workspaceState.update(LAST_FILE_KEY, uri.toString());
+  target.update({
+    file: fileLabel,
+    analysis: cached.analysis,
+    overview,
+    layout,
+    meta: {
+      model: cached.model,
+      generatedAt: cached.generatedAt,
+      usage: cached.usage,
+      issues
+    }
+  });
+  target.setStatus(
+    'ready',
+    issues.length > 0
+      ? `Ready. ${issues.length} record${issues.length === 1 ? '' : 's'} dropped by validation.`
+      : 'Ready.'
+  );
+  if (reveal) {
+    target.reveal();
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (editor && editor.document.uri.toString() === uri.toString()) {
+    target.setCursor(editor.selection.active.line + 1);
+  }
+
+  clearDecorations();
+  applyValueColors();
+
+  void attachBrief(uri, fileLabel, sourceHash);
 }
 
-async function chooseExplanationLevel(): Promise<void> {
-  const levels: ExplanationLevel[] = ['concise', 'medium', 'detailed', 'story', 'walkthrough'];
-  const selected = await vscode.window.showQuickPick(levels, {
-    title: 'Code Explainer: Explanation Level',
-    placeHolder: 'Choose how much detail to generate'
+async function readCachedForUri(
+  uri: vscode.Uri
+): Promise<{ cached: CachedAnalysis; fileLabel: string; text: string } | undefined> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const text = document.getText();
+  const config = getConfig();
+  const fileLabel = vscode.workspace.asRelativePath(uri, false);
+  const docs = config.includeDocs ? await readProjectDocs(uri) : '';
+
+  const exact = await cache.read(cache.key(text, config.model, `${fileLabel}\0${docs}`));
+  if (exact) {
+    return { cached: exact, fileLabel, text };
+  }
+
+  const fallback = await cache.readLatestForFile(fileLabel, cache.sourceHash(text), config.model);
+  return fallback ? { cached: fallback, fileLabel, text } : undefined;
+}
+
+async function restoreLastAnalysis(context: vscode.ExtensionContext, force: boolean): Promise<boolean> {
+  if (!force && !getConfig().restoreLastAnalysis) {
+    return false;
+  }
+
+  const stored = context.workspaceState.get<string>(LAST_FILE_KEY);
+  let uri: vscode.Uri | undefined;
+
+  if (stored) {
+    try {
+      uri = vscode.Uri.parse(stored);
+    } catch {
+      uri = undefined;
+    }
+  }
+
+  if (!uri) {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document.languageId === 'rust') {
+      uri = editor.document.uri;
+    }
+  }
+
+  if (!uri || uri.scheme !== 'file') {
+    return false;
+  }
+
+  try {
+    await vscode.workspace.fs.stat(uri);
+  } catch {
+    return false;
+  }
+
+  try {
+    const hit = await readCachedForUri(uri);
+    if (!hit) {
+      const config = getConfig();
+      if (!config.model) {
+        return false;
+      }
+
+      const document = await vscode.workspace.openTextDocument(uri);
+      const fileLabel = vscode.workspace.asRelativePath(uri, false);
+      const sourceHash = cache.sourceHash(document.getText());
+      const latest = await briefCache.readLatestForFile(fileLabel, config.model, sourceHash, uri.toString());
+      if (!latest) {
+        return false;
+      }
+
+      await showStructuralOverview(uri, true);
+      return true;
+    }
+
+    await showAnalysis(uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+
+    if (cache.sourceHash(hit.text) !== hit.cached.sourceHash) {
+      panel?.setStatus('stale', 'File changed since this analysis. Analyze again to refresh.');
+    }
+
+    return true;
+  } catch (error) {
+    output.appendLine(`[restore] ${messageOf(error)}`);
+    return false;
+  }
+}
+
+function ensurePanel(uri: vscode.Uri): ReaderPanel {
+  if (panel?.isDisposed) {
+    panel = undefined;
+  }
+
+  if (!panel) {
+    panel = ReaderPanel.create(contextRef, uri, {
+      onReveal: (start, end) => void revealRange(start, end),
+      onAnalyze: (force) => {
+        const target = panelUri ?? current?.uri;
+        if (target) {
+          void readAndAnalyzeFile(target, force);
+        }
+      },
+      onImportEnv: () => void vscode.commands.executeCommand('derust.importEnv'),
+      onScrolled: (line) => revealLineFromWebview(line)
+    });
+    contextRef.subscriptions.push(panel);
+  }
+
+  return panel;
+}
+
+async function revealRange(start: number, end: number): Promise<void> {
+  const uri = panelUri ?? current?.uri;
+  if (!uri) {
+    return;
+  }
+
+  ignoreEditorScrollUntil = Date.now() + 250;
+  const document = await vscode.workspace.openTextDocument(uri);
+  const editor = await vscode.window.showTextDocument(document, {
+    viewColumn: vscode.ViewColumn.One,
+    preserveFocus: false
   });
 
-  if (selected && isExplanationLevel(selected)) {
-    await setExplanationLevel(selected);
-    refreshSettingsDisplay();
-    vscode.window.showInformationMessage(`Code Explainer level set to ${selected}.`);
-  }
+  const startLine = Math.max(0, Math.min(start - 1, document.lineCount - 1));
+  const endLine = Math.max(startLine, Math.min(end - 1, document.lineCount - 1));
+  const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).range.end.character);
+
+  editor.selection = new vscode.Selection(range.start, range.end);
+  editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  editor.setDecorations(activeDecoration, [range]);
+  applyValueColors();
 }
 
-async function toggleReviewMode(): Promise<void> {
-  const config = getCodeExplainerConfig();
-  const nextValue = !config.reviewEnabled;
-  await setReviewEnabled(nextValue);
-  refreshSettingsDisplay();
-  vscode.window.showInformationMessage(`Code Explainer review mode ${nextValue ? 'enabled' : 'disabled'}.`);
-}
-
-function clearCache(): void {
-  store.clearCache();
-  vscode.window.showInformationMessage('Code Explainer cache cleared.');
-}
-
-async function saveCurrentExplanation(): Promise<void> {
-  const sourceEditor = activeSourceEditor ?? getTargetSourceEditor();
-  if (!sourceEditor) {
-    vscode.window.showWarningMessage('No explained source file is active.');
-    return;
-  }
-
-  const stored = store.getBySource(sourceEditor.document.uri);
-  if (!stored) {
-    vscode.window.showWarningMessage('No generated explanation is available to save for this file.');
-    return;
-  }
-
-  const snapshotUri = await writeSnapshot(stored, getCodeExplainerConfig(), sourceEditor.document.languageId, sourceEditor.document.lineCount);
-  if (!snapshotUri) {
-    vscode.window.showWarningMessage('Open this file inside a workspace before saving an explanation snapshot.');
-    return;
-  }
-
-  vscode.window.showInformationMessage(`Saved explanation snapshot: ${vscode.workspace.asRelativePath(snapshotUri)}`);
-}
-
-async function explainFolder(context: vscode.ExtensionContext): Promise<void> {
-  const selected = await vscode.window.showOpenDialog({
-    canSelectFiles: false,
-    canSelectFolders: true,
-    canSelectMany: false,
-    openLabel: 'Explain Folder'
-  });
-
-  const folder = selected?.[0];
-  if (!folder) {
-    return;
-  }
-
-  await explainUriSet(context, await findExplainableFiles(folder));
-}
-
-async function explainWorkspace(context: vscode.ExtensionContext): Promise<void> {
-  await explainUriSet(context, await findExplainableFiles());
-}
-
-async function adjustSyncOffset(delta: number): Promise<void> {
-  const config = getCodeExplainerConfig();
-  const nextOffset = config.syncLineOffset + delta;
-  await setSyncLineOffset(nextOffset);
-  refreshSettingsDisplay();
-  const offset = getCodeExplainerConfig().syncLineOffset;
-  vscode.window.showInformationMessage(`Code Explainer sync offset set to ${formatOffset(offset)} line${Math.abs(offset) === 1 ? '' : 's'}.`);
-}
-
-async function resetSyncOffset(): Promise<void> {
-  await setSyncLineOffset(0);
-  refreshSettingsDisplay();
-  vscode.window.showInformationMessage('Code Explainer sync offset reset to 0.');
-}
-
-async function ensureApiKey(context: vscode.ExtensionContext, provider: LLMProvider): Promise<string | undefined> {
-  const apiKey = await resolveApiKey(context, provider);
+async function ensureApiKey(): Promise<string | undefined> {
+  let apiKey = await resolveApiKey(contextRef);
   if (apiKey) {
     return apiKey;
   }
 
-  return promptForApiKey(context, provider, {
-    title: `Code Explainer: ${providerDisplayName(provider)} API Key Required`,
-    prompt: `Enter your ${providerDisplayName(provider)} API key to generate explanations. It will be stored in VS Code SecretStorage.`
-  });
-}
-
-async function ensureModelAndApiKey(
-  context: vscode.ExtensionContext
-): Promise<{ config: ReturnType<typeof getCodeExplainerConfig>; activeModel: string; apiKey: string } | undefined> {
-  let config = getCodeExplainerConfig();
-  let apiKey = await resolveApiKey(context, config.provider);
-
-  if (!apiKey) {
-    const didChooseModel = await chooseModel();
-    if (!didChooseModel) {
-      return undefined;
-    }
-    config = getCodeExplainerConfig();
-  }
-
-  apiKey = await ensureApiKey(context, config.provider);
-  if (!apiKey) {
-    return undefined;
-  }
-
-  return {
-    config,
-    activeModel: getActiveModel(config),
-    apiKey
-  };
-}
-
-async function promptForApiKey(
-  context: vscode.ExtensionContext,
-  provider: LLMProvider,
-  options: { title?: string; prompt?: string } = {}
-): Promise<string | undefined> {
-  const value = await vscode.window.showInputBox({
-    title: options.title ?? `Code Explainer: ${providerDisplayName(provider)} API Key`,
-    prompt: options.prompt ?? 'Stored in VS Code SecretStorage.',
-    password: true,
-    ignoreFocusOut: true,
-    validateInput: (input) => (input.trim() ? undefined : 'Enter a non-empty API key.')
-  });
-
-  if (!value) {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  await storeApiKey(context, provider, trimmed);
-  vscode.window.showInformationMessage(`${providerDisplayName(provider)} API key saved for Code Explainer.`);
-  return trimmed;
-}
-
-async function clearStoredApiKey(context: vscode.ExtensionContext, provider: LLMProvider): Promise<void> {
-  await clearApiKey(context, provider);
-  vscode.window.showInformationMessage(`${providerDisplayName(provider)} API key cleared for Code Explainer.`);
-}
-
-function markStaleIfExplained(document: vscode.TextDocument): void {
-  const existing = store.getBySource(document.uri);
-  if (existing && existing.key.documentVersion !== document.version) {
-    diagnosticsController.clear(document.uri);
-    inlineController.refresh(document.uri);
-    vscode.window.setStatusBarMessage('Code Explainer: explanation is stale. Run Refresh Explanation.', 6000);
-  }
-}
-
-async function handleSavedDocument(context: vscode.ExtensionContext, document: vscode.TextDocument): Promise<void> {
-  if (document.uri.scheme !== 'file') {
-    return;
-  }
-
-  const config = getCodeExplainerConfig();
-  if (isExcluded(document.uri, config.excludedGlobs)) {
-    return;
-  }
-
-  const existing = store.getBySource(document.uri);
-  let snapshot: Awaited<ReturnType<typeof readSnapshot>> | undefined;
-  try {
-    snapshot = config.persistExplanations ? await readSnapshot(document.uri, config) : undefined;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    vscode.window.setStatusBarMessage(`Code Explainer: could not read snapshot (${message}).`, 6000);
-  }
-  if (!existing && !snapshot) {
-    return;
-  }
-
-  const activeModel = getActiveModel(config);
-  const contentHash = hashText(document.getText());
-  const existingIsFresh = Boolean(
-    existing &&
-      existing.key.contentHash === contentHash &&
-      existing.key.provider === config.provider &&
-      existing.key.level === config.explanationLevel &&
-      existing.key.reviewEnabled === config.reviewEnabled &&
-      existing.key.model === activeModel
+  const answer = await vscode.window.showInformationMessage(
+    'Derust needs a provider API key. Import it from a .env file?',
+    'Import settings'
   );
-  const snapshotIsFresh = Boolean(snapshot && snapshotMatches(snapshot, contentHash, config, document.lineCount));
-  if (existingIsFresh || snapshotIsFresh) {
-    return;
+
+  if (answer === 'Import settings') {
+    await vscode.commands.executeCommand('derust.importEnv');
+    apiKey = await resolveApiKey(contextRef);
   }
 
-  if (config.autoRegenerateOnSave) {
-    await revealDocumentForGeneration(document);
-    await explainCurrentFile(context, true);
+  return apiKey;
+}
+
+async function readAndAnalyzeFile(uri: vscode.Uri, force: boolean): Promise<void> {
+  if (!force && briefTarget === uri.toString() && briefController) {
     return;
   }
+  const target = ensurePanel(uri);
+  panelUri = uri;
+  target.setSource(uri);
+  target.reveal();
 
-  const promptKey = document.uri.toString();
-  if (staleSavePromptInFlight.has(promptKey)) {
-    return;
-  }
+  await explainFile(uri, force);
 
-  staleSavePromptInFlight.add(promptKey);
   try {
-    const action = await vscode.window.showInformationMessage(
-      `Code Explainer snapshot is stale for ${vscode.workspace.asRelativePath(document.uri)}.`,
-      'Regenerate'
-    );
-    if (action === 'Regenerate') {
-      await revealDocumentForGeneration(document);
-      await explainCurrentFile(context, true);
+    await analyzeUri(uri, { force, showPanel: true });
+  } catch (error) {
+    vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+  }
+}
+
+async function runAnalyze(uri: vscode.Uri, options: AnalyzeOptions): Promise<void> {
+  try {
+    await analyzeUri(uri, options);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+  }
+}
+
+function handleSelection(event: vscode.TextEditorSelectionChangeEvent): void {
+  if (!panel || !panelUri) {
+    return;
+  }
+
+  if (event.textEditor.document.uri.toString() !== panelUri.toString()) {
+    return;
+  }
+
+  const line = event.selections[0]?.active.line;
+  if (line === undefined) {
+    return;
+  }
+
+  if (selectionTimer) {
+    clearTimeout(selectionTimer);
+  }
+
+  selectionTimer = setTimeout(() => {
+    panel?.setCursor(line + 1);
+  }, 80);
+}
+
+function handleDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
+  if (!event.document.uri.path.endsWith('.rs') || event.contentChanges.length === 0) {
+    return;
+  }
+
+  if (changeTimer) {
+    clearTimeout(changeTimer);
+  }
+
+  changeTimer = setTimeout(() => {
+    overviewLens?.refresh();
+
+    if (!panel || !panelUri || panelUri.toString() !== event.document.uri.toString()) {
+      return;
     }
-  } finally {
-    staleSavePromptInFlight.delete(promptKey);
+
+    if (current && current.uri.toString() === event.document.uri.toString()) {
+      const nextHash = cache.sourceHash(event.document.getText());
+      if (nextHash !== current.sourceHash) {
+        const editor = vscode.window.visibleTextEditors.find(
+          (candidate) => candidate.document.uri.toString() === event.document.uri.toString()
+        );
+        if (editor) {
+          clearValueColors(editor);
+        }
+        panel.setStatus('stale', 'File changed. Analyze again to refresh.');
+      }
+    }
+
+    void refreshOverview(event.document);
+  }, 250);
+}
+
+async function refreshOverview(document: vscode.TextDocument): Promise<void> {
+  if (!panel || !panelUri || panelUri.toString() !== document.uri.toString()) {
+    return;
+  }
+
+  const version = document.version;
+
+  try {
+    const overview = await overviewService.build(document);
+    if (
+      !panel ||
+      !panelUri ||
+      panelUri.toString() !== document.uri.toString() ||
+      document.version !== version
+    ) {
+      return;
+    }
+
+    panel.updateOverview({
+      file: vscode.workspace.asRelativePath(document.uri, false),
+      overview
+    });
+
+    if (!current || current.uri.toString() !== document.uri.toString()) {
+      panel.setStatus(
+        'ready',
+        'Overview from source. Read & Analyze builds the module reading, spotlights and ownership.'
+      );
+    }
+
+    void attachBrief(
+      document.uri,
+      vscode.workspace.asRelativePath(document.uri, false),
+      cache.sourceHash(document.getText())
+    );
+  } catch (error) {
+    output.appendLine(`[overview] ${messageOf(error)}`);
   }
 }
 
-async function revealDocumentForGeneration(document: vscode.TextDocument): Promise<void> {
-  activeSourceEditor = await vscode.window.showTextDocument(document, {
-    preview: false,
-    preserveFocus: false
-  });
-}
-
-function isExcluded(uri: vscode.Uri, globs: string[]): boolean {
-  return matchesAnyGlob(uri.fsPath.replaceAll(path.sep, '/'), globs);
-}
-
-function isExplanationLevel(value: string): value is ExplanationLevel {
-  return value === 'concise' || value === 'medium' || value === 'detailed' || value === 'story' || value === 'walkthrough';
-}
-
-function formatOffset(offset: number): string {
-  return offset >= 0 ? `+${offset}` : String(offset);
-}
-
-let extensionUri: vscode.Uri | undefined;
-
-function contextExtensionUri(): vscode.Uri {
-  if (!extensionUri) {
-    throw new Error('Extension URI is not initialized.');
-  }
-  return extensionUri;
-}
-
-function getTargetSourceEditor(): vscode.TextEditor | undefined {
-  const active = vscode.window.activeTextEditor;
-  if (active?.document.uri.scheme === 'file') {
-    return active;
+function handleActiveEditor(editor: vscode.TextEditor | undefined): void {
+  if (panel?.isDisposed) {
+    panel = undefined;
   }
 
-  return activeSourceEditor;
-}
-
-function findVisibleSourceEditor(): vscode.TextEditor | undefined {
-  if (activeSourceEditor && vscode.window.visibleTextEditors.includes(activeSourceEditor)) {
-    return activeSourceEditor;
+  if (!editor || !panel || editor.document.languageId !== 'rust') {
+    return;
   }
 
-  if (!activeExplanationPanel) {
-    return undefined;
+  const uri = editor.document.uri;
+
+  if (panelUri?.toString() === uri.toString()) {
+    panel.setCursor(editor.selection.active.line + 1);
+    if (current) {
+      if (current.sourceHash === cache.sourceHash(editor.document.getText())) {
+        applyValueColors();
+      } else {
+        clearValueColors(editor);
+      }
+    }
+    return;
   }
 
-  return vscode.window.visibleTextEditors.find((editor) => activeExplanationPanel?.matchesSource(editor.document.uri));
+  void (async () => {
+    try {
+      const hit = await readCachedForUri(uri);
+      if (vscode.window.activeTextEditor?.document.uri.toString() !== uri.toString()) {
+        return;
+      }
+
+      if (hit) {
+        await showAnalysis(uri, hit.fileLabel, hit.cached, getConfig().defaultLayout, false);
+      } else {
+        await showStructuralOverview(uri, false);
+      }
+      applyValueColors();
+    } catch (error) {
+      output.appendLine(`[follow] ${messageOf(error)}`);
+    }
+  })();
 }
 
-function handleSourceVisibleRangesChanged(event: vscode.TextEditorVisibleRangesChangeEvent): void {
-  const config = getCodeExplainerConfig();
-  if (
-    !activeExplanationPanel ||
-    !activeExplanationPanel.matchesSource(event.textEditor.document.uri) ||
-    config.explanationLevel === 'walkthrough' ||
-    Date.now() < ignoreSourceScrollUntil
-  ) {
+function handleVisibleRanges(event: vscode.TextEditorVisibleRangesChangeEvent): void {
+  if (Date.now() < ignoreEditorScrollUntil) {
+    return;
+  }
+
+  if (!panel || !panelUri) {
+    return;
+  }
+
+  if (event.textEditor.document.uri.toString() !== panelUri.toString()) {
     return;
   }
 
@@ -638,300 +1399,129 @@ function handleSourceVisibleRangesChanged(event: vscode.TextEditorVisibleRangesC
     return;
   }
 
-  if (sourceScrollDebounce) {
-    clearTimeout(sourceScrollDebounce);
+  if (visibleRangesTimer) {
+    clearTimeout(visibleRangesTimer);
   }
 
-  sourceScrollDebounce = setTimeout(() => {
-    const targetLine = mapSyncTargetLine(
-      topLine,
-      'sourceToExplanation',
-      config.syncLineOffset,
-      event.textEditor.document.lineCount
-    );
-    ignoreWebviewScrollUntil = Date.now() + 250;
-    activeExplanationPanel?.revealLine(targetLine + 1);
-  }, 50);
+  visibleRangesTimer = setTimeout(() => {
+    panel?.setScrollLine(topLine + 1);
+  }, 60);
 }
 
-function handleSourceSelectionChanged(event: vscode.TextEditorSelectionChangeEvent): void {
-  if (!activeExplanationPanel || !activeExplanationPanel.matchesSource(event.textEditor.document.uri)) {
+function revealLineFromWebview(line: number): void {
+  const uri = panelUri ?? current?.uri;
+  if (!uri) {
     return;
   }
 
-  updateActiveLineFromEditor(event.textEditor);
-}
-
-function updateActiveLineFromEditor(editor: vscode.TextEditor): void {
-  activeSourceEditor = editor;
-  activeSourceLine = editor.selection.active.line + 1;
-  if (getCodeExplainerConfig().explanationLevel === 'walkthrough') {
-    activeExplanationPanel?.setActiveLine(activeSourceLine);
-    return;
-  }
-  activeExplanationPanel?.setActiveLine(resolveRightPanelAnchorLine(activeSourceLine));
-}
-
-function handleWebviewVisibleLineChanged(line: number): void {
-  const config = getCodeExplainerConfig();
-  if (config.explanationLevel === 'walkthrough' || Date.now() < ignoreWebviewScrollUntil) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.toString() !== uri.toString()) {
     return;
   }
 
-  const sourceEditor = findVisibleSourceEditor();
-  if (!sourceEditor) {
-    return;
-  }
-
-  const targetLine = mapSyncTargetLine(
-    line - 1,
-    'explanationToSource',
-    config.syncLineOffset,
-    sourceEditor.document.lineCount
-  );
-
-  ignoreSourceScrollUntil = Date.now() + 250;
-  sourceEditor.revealRange(new vscode.Range(targetLine, 0, targetLine, 0), vscode.TextEditorRevealType.AtTop);
-}
-
-function handleWebviewActiveLineChanged(line: number): void {
-  const sourceEditor = findVisibleSourceEditor();
-  if (!sourceEditor) {
-    return;
-  }
-
-  const config = getCodeExplainerConfig();
-  activeSourceLine = line;
-  activeSourceEditor = sourceEditor;
-  const targetLine = Math.max(0, Math.min(sourceEditor.document.lineCount - 1, line - 1));
-  ignoreSourceScrollUntil = Date.now() + 250;
-  const revealType =
-    config.explanationLevel === 'walkthrough'
-      ? vscode.TextEditorRevealType.AtTop
-      : vscode.TextEditorRevealType.InCenterIfOutsideViewport;
-  sourceEditor.revealRange(new vscode.Range(targetLine, 0, targetLine, 0), revealType);
-}
-
-async function handleExplanationPanelCommand(message: ExplanationWebviewCommand): Promise<void> {
-  switch (message.command) {
-    case 'refresh':
-      await vscode.commands.executeCommand('codeExplainer.refreshExplanation');
-      break;
-    case 'setModel':
-      await chooseModel();
-      break;
-    case 'setLevel':
-      if (isExplanationLevel(message.level)) {
-        await setExplanationLevel(message.level);
-        refreshSettingsDisplay();
-      }
-      break;
-    case 'toggleInline':
-      await toggleInlineExplanations();
-      break;
-    case 'toggleReview':
-      await toggleReviewMode();
-      break;
-    case 'clearCache':
-      clearCache();
-      break;
-    case 'increaseOffset':
-      await adjustSyncOffset(1);
-      break;
-    case 'decreaseOffset':
-      await adjustSyncOffset(-1);
-      break;
-    case 'resetOffset':
-      await resetSyncOffset();
-      break;
-  }
-}
-
-async function handleAskFollowUp(context: vscode.ExtensionContext, focus: FollowUpFocus): Promise<void> {
-  const panel = activeExplanationPanel;
-  const sourceEditor = findVisibleSourceEditor() ?? activeSourceEditor;
-  if (!panel || !sourceEditor || !panel.matchesSource(sourceEditor.document.uri)) {
-    vscode.window.showWarningMessage('Open an explanation panel before asking a follow-up question.');
-    return;
-  }
-
-  const document = sourceEditor.document;
-  const config = getCodeExplainerConfig();
-  const question = await vscode.window.showInputBox({
-    title: 'Code Explainer: Ask Follow-Up',
-    prompt: formatFollowUpPrompt(focus),
-    placeHolder: 'Ask about this line or chunk...',
-    ignoreFocusOut: true,
-    validateInput: (input) => (input.trim() ? undefined : 'Enter a question.')
-  });
-  if (!question) {
-    return;
-  }
-
-  const trimmedQuestion = question.trim();
-  const apiKey = await ensureApiKey(context, config.provider);
-  if (!apiKey) {
-    return;
-  }
-
-  panel.showFollowUpThinking(trimmedQuestion);
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Code Explainer follow-up',
-      cancellable: true
-    },
-    async (progress, token) => {
-      progress.report({ message: 'Asking model...' });
-      const abortController = new AbortController();
-      token.onCancellationRequested(() => abortController.abort());
-      const activeModel = getActiveModel(config);
-      const client = config.provider === 'anthropic' ? new AnthropicClient() : new OpenAIClient();
-
-      try {
-        const answer = await client.askQuestionStream(
-          followUpSystemPrompt,
-          buildFollowUpUserPrompt({
-            fileName: config.includeFullPath ? document.uri.fsPath : path.basename(document.uri.fsPath),
-            languageId: document.languageId,
-            totalLines: document.lineCount,
-            focusLine: focus.line,
-            focusEndLine: focus.endLine,
-            question: trimmedQuestion,
-            sourceText: document.getText()
-          }),
-          {
-            apiKey,
-            model: activeModel,
-            signal: abortController.signal
-          },
-          (partialAnswer) => {
-            panel.showFollowUpPartial(partialAnswer);
-          }
-        );
-        panel.showFollowUpAnswer(answer);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        panel.showFollowUpError(`Code Explainer follow-up failed: ${message}`);
-        vscode.window.showErrorMessage(`Code Explainer follow-up failed: ${message}`);
-      }
-    }
+  const target = Math.max(0, Math.min(line - 1, editor.document.lineCount - 1));
+  ignoreEditorScrollUntil = Date.now() + 250;
+  editor.revealRange(
+    new vscode.Range(target, 0, target, 0),
+    vscode.TextEditorRevealType.AtTop
   );
 }
 
-function formatFollowUpPrompt(focus: FollowUpFocus): string {
-  if (typeof focus.endLine === 'number' && focus.endLine > focus.line) {
-    return `Ask a question about source lines ${focus.line}-${focus.endLine}.`;
+function clearDecorations(): void {
+  const editor = vscode.window.activeTextEditor;
+  if (editor) {
+    editor.setDecorations(activeDecoration, []);
+    editor.setDecorations(pinnedDecoration, []);
   }
-
-  return `Ask a question about source line ${focus.line}.`;
+  clearValueColors();
 }
 
-function refreshSettingsDisplay(): void {
-  const config = getCodeExplainerConfig();
-  statusBarController.update(config);
-  inlineController.refresh();
-  const stored = activeSourceEditor ? store.getBySource(activeSourceEditor.document.uri) : undefined;
-  if (stored) {
-    activeExplanationPanel?.update(stored, config, getEditorMetrics());
-    activeExplanationPanel?.setActiveLine(config.explanationLevel === 'walkthrough' ? activeSourceLine : resolveRightPanelAnchorLine(activeSourceLine));
+function valueColorIndex(id: string): number {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
   }
+  return hash % MEMORY_COLORS.length;
 }
 
-function resolveRightPanelAnchorLine(sourceLine: number | undefined): number | undefined {
-  if (getCodeExplainerConfig().explanationLevel === 'walkthrough') {
-    return undefined;
-  }
-
-  if (sourceLine === undefined || !activeSourceEditor) {
-    return sourceLine;
-  }
-
-  const stored = store.getBySource(activeSourceEditor.document.uri);
-  if (!stored) {
-    return sourceLine;
-  }
-
-  return resolveExplanationAnchorLine(stored.rendered.lines, sourceLine);
-}
-
-function uniqueNonEmpty(values: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (!trimmed || seen.has(trimmed)) {
-      continue;
+function clearValueColors(editor?: vscode.TextEditor): void {
+  const editors = editor ? [editor] : vscode.window.visibleTextEditors;
+  for (const target of editors) {
+    for (const type of valueDecorations) {
+      target.setDecorations(type, []);
     }
-    seen.add(trimmed);
-    result.push(trimmed);
   }
-  return result;
 }
 
-async function findExplainableFiles(folder?: vscode.Uri): Promise<vscode.Uri[]> {
-  const config = getCodeExplainerConfig();
-  const seen = new Set<string>();
-  const result: vscode.Uri[] = [];
+function applyValueColors(): void {
+  clearValueColors();
 
-  for (const includeGlob of config.includeGlobs) {
-    const pattern = folder ? new vscode.RelativePattern(folder.fsPath, includeGlob) : includeGlob;
-    const matches = await vscode.workspace.findFiles(pattern);
-    for (const uri of matches) {
-      const key = uri.toString();
-      if (seen.has(key) || isExcluded(uri, config.excludedGlobs)) {
+  const editor = vscode.window.activeTextEditor;
+  if (
+    !editor ||
+    !current ||
+    editor.document.uri.toString() !== current.uri.toString() ||
+    !getConfig().colorCode
+  ) {
+    return;
+  }
+
+  const ranges = MEMORY_COLORS.map(() => [] as vscode.Range[]);
+  const text = editor.document.getText();
+
+  for (const record of current.analysis.memory || []) {
+    for (const value of record.values || []) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value.name)) {
         continue;
       }
 
-      seen.add(key);
-      result.push(uri);
-    }
-  }
+      const colorIndex = valueColorIndex(value.id);
+      const startLine = Math.max(0, Math.min(editor.document.lineCount - 1, value.start - 1));
+      const endLine = Math.max(startLine, Math.min(editor.document.lineCount - 1, value.end - 1));
+      const startOffset = editor.document.offsetAt(new vscode.Position(startLine, 0));
+      const endOffset = editor.document.offsetAt(
+        new vscode.Position(endLine, editor.document.lineAt(endLine).text.length)
+      );
+      const segment = text.slice(startOffset, endOffset);
+      const pattern = new RegExp(`\\b${escapeRegExp(value.name)}\\b`, 'g');
+      let match: RegExpExecArray | null;
 
-  return result.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
-}
-
-async function explainUriSet(context: vscode.ExtensionContext, uris: vscode.Uri[]): Promise<void> {
-  if (uris.length === 0) {
-    vscode.window.showInformationMessage('No explainable files matched the configured includeGlobs.');
-    return;
-  }
-
-  const config = getCodeExplainerConfig();
-  const answer = await vscode.window.showWarningMessage(
-    `Explain ${uris.length} file${uris.length === 1 ? '' : 's'}? Fresh snapshots will be reused, but stale or missing snapshots may call the ${providerDisplayName(config.provider)} API.`,
-    { modal: true },
-    'Continue'
-  );
-
-  if (answer !== 'Continue') {
-    return;
-  }
-
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Code Explainer batch',
-      cancellable: true
-    },
-    async (progress, token) => {
-      for (let index = 0; index < uris.length; index += 1) {
-        if (token.isCancellationRequested) {
-          break;
-        }
-
-        const uri = uris[index];
-        progress.report({
-          message: `${index + 1}/${uris.length}: ${vscode.workspace.asRelativePath(uri)}`
-        });
-        const document = await vscode.workspace.openTextDocument(uri);
-        const editor = await vscode.window.showTextDocument(document, {
-          preview: false,
-          preserveFocus: false
-        });
-        await explainCurrentFile(context);
-        activeSourceEditor = editor;
+      while ((match = pattern.exec(segment)) !== null) {
+        const from = editor.document.positionAt(startOffset + match.index);
+        const to = editor.document.positionAt(startOffset + match.index + match[0].length);
+        ranges[colorIndex].push(new vscode.Range(from, to));
       }
     }
-  );
+  }
+
+  valueDecorations.forEach((type, index) => editor.setDecorations(type, ranges[index]));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function readProjectDocs(uri: vscode.Uri): Promise<string> {
+  const base =
+    crateRoot(uri) ??
+    vscode.workspace.getWorkspaceFolder(uri)?.uri ??
+    vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!base) {
+    return '';
+  }
+
+  const names = ['DESIGN.md', 'README.md', 'Cargo.toml'];
+  let combined = '';
+
+  for (const name of names) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(base, name));
+      const text = new TextDecoder().decode(bytes);
+      combined += `\n# ${name}\n${text}`;
+    } catch {
+      // Missing files are expected; keep the context small.
+    }
+  }
+
+  return combined.slice(0, 8000);
 }

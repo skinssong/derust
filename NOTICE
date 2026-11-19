@@ -1,0 +1,46 @@
+Derust is derived from Code Explainer Story by trancedu:
+https://github.com/trancedu/code-explainer-story
+
+Code Explainer Story is licensed under the MIT License. Its LICENSE file is
+preserved in this repository. The upstream implementation is kept under
+upstream/ for reference; the Derust pipeline, panel and data contract are
+new work. This is a code-lineage credit, not a claim of design inspiration.
+
+Design inspiration and prior art:
+
+- RustViz, https://github.com/rustviz/rustviz
+  Copyright (c) 2020-2026 The RustViz Authors
+  MIT License. The ownership timeline and reference-face presentation are
+  inspired by RustViz.
+
+- Aquascope, https://github.com/cognitive-engineering-lab/aquascope
+  Copyright (c) 2022 Gavin Gray
+  MIT License. The stack/heap permission snapshot is inspired by Aquascope.
+
+No RustViz or Aquascope source code or visual assets are included in this
+project. These credits acknowledge prior art. If code or assets from either
+project are added later, their MIT copyright and permission notices must be
+included in this file.
+
+MIT License
+
+Copyright (c) 2026 trancedu
+Copyright (c) 2026 Derust contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

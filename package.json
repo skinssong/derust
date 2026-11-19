@@ -1,30 +1,38 @@
 {
-  "name": "code-explainer-story",
-  "displayName": "Code Explainer Story",
-  "description": "Side-by-side, line-synced code explanations for VS Code.",
-  "version": "0.0.11",
-  "publisher": "TranceDu",
+  "name": "derust",
+  "displayName": "Derust",
+  "description": "AI-generated, line-anchored readings of Rust: module operations, function walkthroughs, spotlights, and ownership.",
+  "version": "0.8.8",
+  "publisher": "rsong",
+  "icon": "media/icon.png",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/trancedu/code-explainer-story.git"
-  },
-  "homepage": "https://github.com/trancedu/code-explainer-story#readme",
-  "bugs": {
-    "url": "https://github.com/trancedu/code-explainer-story/issues"
-  },
+  "activationEvents": [
+    "workspaceContains:**/*.rs",
+    "onStartupFinished"
+  ],
   "engines": {
     "vscode": "^1.96.0"
   },
   "categories": [
+    "Education",
+    "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "rust",
+    "ownership",
+    "explain",
+    "ai",
+    "learning"
   ],
   "main": "./out/src/extension.js",
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
-    "package:vsix": "npm run compile && mkdir -p release && npx @vscode/vsce package --out release/code-explainer-${npm_package_version}.vsix",
-    "test": "npm run compile && node --test out/test/*.test.js"
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "index:spike": "node scripts/index-spike.js",
+    "profile:spike": "node scripts/profile-smoke.js",
+    "package:vsix": "npm run compile && mkdir -p release && npx @vscode/vsce package --allow-missing-repository --out release/derust-${npm_package_version}.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -34,309 +42,206 @@
   "contributes": {
     "commands": [
       {
-        "command": "codeExplainer.explainCurrentFile",
-        "title": "Code Explainer: Explain Current File",
+        "command": "derust.analyzeFile",
+        "title": "Derust: Read & Analyze Current File",
         "icon": "$(book)"
       },
       {
-        "command": "codeExplainer.refreshExplanation",
-        "title": "Code Explainer: Refresh Explanation",
+        "command": "derust.analyzePath",
+        "title": "Derust: Analyze Path…"
+      },
+      {
+        "command": "derust.analyzeWorkspace",
+        "title": "Derust: Analyze Workspace"
+      },
+      {
+        "command": "derust.openPanel",
+        "title": "Derust: Open Panel",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "derust.showOverview",
+        "title": "Derust: Show File Overview",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "derust.rebuildIndex",
+        "title": "Derust: Rebuild Workspace Index",
         "icon": "$(refresh)"
       },
       {
-        "command": "codeExplainer.setModel",
-        "title": "Code Explainer: Set Model",
-        "icon": "$(symbol-variable)"
+        "command": "derust.showIndexPacket",
+        "title": "Derust: Show Index Packet",
+        "icon": "$(output)"
       },
       {
-        "command": "codeExplainer.setExplanationLevel",
-        "title": "Code Explainer: Set Explanation Level",
-        "icon": "$(list-selection)"
+        "command": "derust.importEnv",
+        "title": "Derust: Import Provider Settings from .env",
+        "icon": "$(key)"
       },
       {
-        "command": "codeExplainer.toggleInlineExplanations",
-        "title": "Code Explainer: Toggle Inline Explanations",
-        "icon": "$(symbol-key)"
-      },
-      {
-        "command": "codeExplainer.toggleReviewMode",
-        "title": "Code Explainer: Toggle Review Mode",
-        "icon": "$(checklist)"
-      },
-      {
-        "command": "codeExplainer.clearCache",
-        "title": "Code Explainer: Clear Cache",
+        "command": "derust.clearCache",
+        "title": "Derust: Clear Analysis Cache",
         "icon": "$(trash)"
-      },
-      {
-        "command": "codeExplainer.saveCurrentExplanation",
-        "title": "Code Explainer: Save Current Explanation Snapshot",
-        "icon": "$(save)"
-      },
-      {
-        "command": "codeExplainer.explainFolder",
-        "title": "Code Explainer: Explain Folder"
-      },
-      {
-        "command": "codeExplainer.explainWorkspace",
-        "title": "Code Explainer: Explain Workspace"
-      },
-      {
-        "command": "codeExplainer.increaseSyncOffset",
-        "title": "Code Explainer: Increase Sync Offset",
-        "icon": "$(arrow-up)"
-      },
-      {
-        "command": "codeExplainer.decreaseSyncOffset",
-        "title": "Code Explainer: Decrease Sync Offset",
-        "icon": "$(arrow-down)"
-      },
-      {
-        "command": "codeExplainer.resetSyncOffset",
-        "title": "Code Explainer: Reset Sync Offset",
-        "icon": "$(debug-restart)"
-      },
-      {
-        "command": "codeExplainer.setOpenAIKey",
-        "title": "Code Explainer: Set OpenAI API Key"
-      },
-      {
-        "command": "codeExplainer.clearOpenAIKey",
-        "title": "Code Explainer: Clear OpenAI API Key"
-      },
-      {
-        "command": "codeExplainer.setAnthropicKey",
-        "title": "Code Explainer: Set Anthropic API Key"
-      },
-      {
-        "command": "codeExplainer.clearAnthropicKey",
-        "title": "Code Explainer: Clear Anthropic API Key"
       }
     ],
-    "configuration": {
-      "title": "Code Explainer",
-      "properties": {
-        "codeExplainer.model": {
-          "type": "string",
-          "default": "gpt-5.4-mini",
-          "description": "Model used for code explanations. Model ids starting with claude use Anthropic; other ids use OpenAI. To add another provider, update the routing and client code described in the README."
-        },
-        "codeExplainer.modelPresets": {
-          "type": "array",
-          "default": [
-            "gpt-5.4-mini",
-            "gpt-5.4",
-            "gpt-5.3-codex",
-            "gpt-5.2",
-            "claude-sonnet-4-6"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "description": "Model names shown by Code Explainer: Set Model. You can still enter a custom model id."
-        },
-        "codeExplainer.explanationLevel": {
-          "type": "string",
-          "enum": [
-            "concise",
-            "medium",
-            "detailed",
-            "story",
-            "walkthrough"
-          ],
-          "default": "medium",
-          "description": "How much detail to include in explanations."
-        },
-        "codeExplainer.reviewEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Include review findings alongside explanations."
-        },
-        "codeExplainer.inline.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show generated explanations near source code with hover text and short end-of-line decorations."
-        },
-        "codeExplainer.inline.maxHints": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "description": "Maximum inline explanation hints shown per file. Set to 0 for no fixed limit."
-        },
-        "codeExplainer.inline.maxTextLength": {
-          "type": "number",
-          "default": 96,
-          "minimum": 20,
-          "description": "Maximum characters used in end-of-line inline explanations."
-        },
-        "codeExplainer.inline.maxCodeColumns": {
-          "type": "number",
-          "default": 100,
-          "minimum": 20,
-          "description": "Only show end-of-line inline text on source lines at or below this width; wider lines still have hover text."
-        },
-        "codeExplainer.syncLineOffset": {
-          "type": "number",
-          "default": 0,
-          "minimum": -20,
-          "maximum": 20,
-          "description": "Line calibration applied while syncing source and explanation panes. Positive values scroll the explanation farther down from source events."
-        },
-        "codeExplainer.webviewHeaderHeight": {
-          "type": "number",
-          "default": 42,
-          "minimum": 32,
-          "maximum": 160,
-          "description": "Height in pixels for the fixed top panel above the explanation content."
-        },
-        "codeExplainer.maxFileLines": {
-          "type": "number",
-          "default": 3000,
-          "minimum": 1,
-          "description": "Maximum source lines allowed for one-call file explanation."
-        },
-        "codeExplainer.maxChunkLines": {
-          "type": "number",
-          "default": 10,
-          "minimum": 5,
-          "description": "Maximum source lines per chunk sent inside the one-file request. Medium mode is capped at 10 lines, story at 8, and walkthrough at 5."
-        },
-        "codeExplainer.cacheExplanations": {
-          "type": "boolean",
-          "default": true,
-          "description": "Reuse in-memory explanations for unchanged files and settings."
-        },
-        "codeExplainer.persistExplanations": {
-          "type": "boolean",
-          "default": true,
-          "description": "Save successful explanations under .code-explainer/explanations so they can be committed and reused."
-        },
-        "codeExplainer.autoRegenerateOnSave": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically regenerate an existing explanation snapshot after its source file is saved. Disabled by default to avoid unexpected API usage."
-        },
-        "codeExplainer.includeGlobs": {
-          "type": "array",
-          "default": [
-            "**/*.py",
-            "**/*.R",
-            "**/*.r",
-            "**/*.ts",
-            "**/*.tsx"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "description": "File globs used by Explain Folder and Explain Workspace commands."
-        },
-        "codeExplainer.privacy.includeFullPath": {
-          "type": "boolean",
-          "default": false,
-          "description": "Include the full file path in the model request. When false, only the basename is sent."
-        },
-        "codeExplainer.excludedGlobs": {
-          "type": "array",
-          "default": [
-            "**/.env",
-            "**/.code-explainer/**",
-            "**/node_modules/**",
-            "**/.git/**",
-            "**/dist/**",
-            "**/build/**"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "description": "Glob patterns that should not be explained."
-        }
-      }
-    },
     "menus": {
       "editor/title": [
         {
-          "command": "codeExplainer.refreshExplanation",
-          "when": "resourceScheme == code-explainer",
+          "command": "derust.analyzeFile",
+          "when": "resourceLangId == rust",
           "group": "navigation@1"
         },
         {
-          "command": "codeExplainer.setModel",
-          "when": "resourceScheme == code-explainer",
+          "command": "derust.openPanel",
+          "when": "resourceLangId == rust",
           "group": "navigation@2"
-        },
-        {
-          "command": "codeExplainer.setExplanationLevel",
-          "when": "resourceScheme == code-explainer",
-          "group": "navigation@3"
-        },
-        {
-          "command": "codeExplainer.toggleInlineExplanations",
-          "when": "resourceScheme == code-explainer",
-          "group": "navigation@4"
-        },
-        {
-          "command": "codeExplainer.toggleReviewMode",
-          "when": "resourceScheme == code-explainer",
-          "group": "navigation@5"
-        },
-        {
-          "command": "codeExplainer.clearCache",
-          "when": "resourceScheme == code-explainer",
-          "group": "navigation@6"
-        },
-        {
-          "command": "codeExplainer.saveCurrentExplanation",
-          "when": "resourceScheme == code-explainer",
-          "group": "navigation@7"
-        },
-        {
-          "command": "codeExplainer.decreaseSyncOffset",
-          "when": "resourceScheme == code-explainer",
-          "group": "2_sync@1"
-        },
-        {
-          "command": "codeExplainer.increaseSyncOffset",
-          "when": "resourceScheme == code-explainer",
-          "group": "2_sync@2"
-        },
-        {
-          "command": "codeExplainer.resetSyncOffset",
-          "when": "resourceScheme == code-explainer",
-          "group": "2_sync@3"
-        }
-      ],
-      "editor/title/context": [
-        {
-          "command": "codeExplainer.explainCurrentFile",
-          "when": "resourceScheme == file",
-          "group": "7_codeExplainer@1"
         }
       ],
       "explorer/context": [
         {
-          "command": "codeExplainer.explainCurrentFile",
-          "when": "!explorerResourceIsFolder && resourceScheme == file",
-          "group": "7_codeExplainer@1"
+          "command": "derust.analyzeFile",
+          "when": "resourceExtname == .rs",
+          "group": "7_derust@1"
+        },
+        {
+          "command": "derust.analyzePath",
+          "when": "explorerResourceIsFolder",
+          "group": "7_derust@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "derust.analyzeFile"
+        },
+        {
+          "command": "derust.analyzePath"
+        },
+        {
+          "command": "derust.analyzeWorkspace"
+        },
+        {
+          "command": "derust.openPanel"
+        },
+        {
+          "command": "derust.showOverview"
+        },
+        {
+          "command": "derust.rebuildIndex"
+        },
+        {
+          "command": "derust.showIndexPacket"
+        },
+        {
+          "command": "derust.importEnv"
+        },
+        {
+          "command": "derust.clearCache"
         }
       ]
     },
-    "languages": [
+    "keybindings": [
       {
-        "id": "code-explainer-output",
-        "aliases": [
-          "Code Explainer Output"
-        ],
-        "extensions": [
-          ".code-explainer"
-        ]
+        "command": "derust.analyzeFile",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorLangId == rust"
       }
     ],
-    "configurationDefaults": {
-      "[code-explainer-output]": {
-        "editor.wordWrap": "off",
-        "editor.lineNumbers": "on",
-        "editor.minimap.enabled": false,
-        "editor.renderWhitespace": "none"
+    "configuration": {
+      "title": "Derust",
+      "properties": {
+        "derust.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI-compatible base URL, for example https://api.openai.com/v1. The extension POSTs to <baseUrl>/chat/completions. Set it with Derust: Import Provider Settings from .env or in settings."
+        },
+        "derust.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model id sent to the configured provider."
+        },
+        "derust.jsonMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send response_format: {type: \"json_object\"}. Falls back automatically if the provider rejects it."
+        },
+        "derust.timeoutSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 10,
+          "description": "Timeout for one analysis request."
+        },
+        "derust.maxOutputTokens": {
+          "type": "number",
+          "default": 32768,
+          "minimum": 1024,
+          "description": "Output token cap. Reasoning models spend part of this budget on thinking before writing JSON."
+        },
+        "derust.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "low",
+          "description": "Reasoning effort sent to the provider. Dropped automatically if the provider rejects it."
+        },
+        "derust.maxFileLines": {
+          "type": "number",
+          "default": 1200,
+          "minimum": 50,
+          "description": "Files longer than this are refused. Increase it for large modules; cost and truncation risk rise with size."
+        },
+        "derust.includeDocs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include DESIGN.md, README.md and Cargo.toml from the workspace root as project context."
+        },
+        "derust.concurrency": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Files analyzed in parallel for folder/workspace runs."
+        },
+        "derust.maxFiles": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Ask for confirmation when a multi-file run exceeds this count."
+        },
+        "derust.defaultLayout": {
+          "type": "string",
+          "enum": [
+            "cards",
+            "columns"
+          ],
+          "default": "cards",
+          "description": "Default spotlight layout."
+        },
+        "derust.restoreLastAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reopen the last file's cached analysis or brief when VS Code starts."
+        },
+        "derust.colorCode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Color identifiers in the editor to match the memory timeline lanes."
+        },
+        "derust.overviewGlance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a one-line overview above the first line of Rust files. Click it to open the Overview tab."
+        },
+        "derust.briefOnOverview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate the AI module reading when you open the file overview from the glance or Show File Overview command. The reading is cached per file content; turn this off to use the Explain this file button instead."
+        }
       }
     }
   }
