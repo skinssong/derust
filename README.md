@@ -144,6 +144,10 @@ shows the quoted construct, what it means, what it expands to, and, when useful,
 the trap. Click a card to reveal its source range. Use **Cards/Columns** to
 switch between the compact and comparison layouts.
 
+![Derust scroll synchronization between the editor and Spotlights](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/scroll-sync.gif)
+
+*Scrolling the code moves Spotlights to the matching construct. Scrolling Spotlights moves the editor to the same range.*
+
 ### Ownership
 
 Ownership renders one memory model per key function when the analysis provides
