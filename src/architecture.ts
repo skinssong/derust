@@ -62,6 +62,8 @@ export type BriefModule = {
 export type BriefStart = BriefModule & { reason: string };
 
 export type BriefOverview = {
+  /** Short kind label derived from the code, e.g. "LLM agent harness". */
+  archetype: string;
   identity: string;
   start: string;
   what: string;
@@ -1327,7 +1329,7 @@ function buildProjectBrief(
     .join(' ');
 
   return {
-    overview: { identity, start, what, appearsTo, evidence, flow, dataFlow: dataFlowText, transformations: transformationsText, technology, map },
+    overview: { archetype, identity, start, what, appearsTo, evidence, flow, dataFlow: dataFlowText, transformations: transformationsText, technology, map },
     startHere,
     modules,
     carriers,

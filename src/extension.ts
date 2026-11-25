@@ -26,6 +26,7 @@ import { ReaderPanel } from './panel';
 import { crateRoot, readCrateName } from './project';
 import { completeJson, completeJsonRepair, ProviderSettings } from './provider';
 import { buildFlowInput, extractJsonObject, FLOW_SYSTEM_PROMPT, linkFlowSources, parseFlowText } from './flow';
+import { buildFlowBriefInput, FLOW_BRIEF_SYSTEM_PROMPT, parseFlowBrief } from './flowBrief';
 import { buildReadingInput, parseReading, READING_SYSTEM_PROMPT } from './reading';
 import { PROMPT_VERSION } from './schema';
 
@@ -395,6 +396,53 @@ async function writeFlow(): Promise<void> {
     }
     const flow = parsed.spec;
     linkFlowSources(flow, model);
+    const briefSettings: ProviderSettings = {
+      ...settings,
+      maxTokens: Math.min(config.maxOutputTokens, 1200)
+    };
+    try {
+      const briefResult = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Derust — ${model.meta.crate} opening line`,
+          cancellable: true
+        },
+        async (progress, token) => {
+          progress.report({ message: 'Writing the opening line…' });
+          const controller = new AbortController();
+          token.onCancellationRequested(() => controller.abort());
+          return completeJson(
+            FLOW_BRIEF_SYSTEM_PROMPT,
+            buildFlowBriefInput(model, flow),
+            briefSettings,
+            controller.signal
+          );
+        }
+      );
+      let brief = parseFlowBrief(briefResult.text);
+      if (!brief) {
+        output.appendLine(
+          `[architecture] brief raw (finish=${briefResult.finishReason ?? '?'}): ${briefResult.text.replace(/\s+/g, ' ').slice(0, 2000)}`
+        );
+        const repair = await completeJsonRepair(
+          FLOW_BRIEF_SYSTEM_PROMPT,
+          buildFlowBriefInput(model, flow),
+          briefResult.text,
+          briefSettings
+        );
+        brief = parseFlowBrief(repair.text);
+        if (!brief) {
+          output.appendLine(
+            `[architecture] brief retry raw (finish=${repair.finishReason ?? '?'}): ${repair.text.replace(/\s+/g, ' ').slice(0, 2000)}`
+          );
+        }
+      }
+      if (brief) {
+        flow.brief = brief;
+      }
+    } catch (error) {
+      output.appendLine(`[architecture] brief: ${messageOf(error)}`);
+    }
     const generatedAt = new Date().toISOString();
     flowCache.write(model.meta.root, flowCache.key(model.meta.revision, config.model), {
       ...flow,

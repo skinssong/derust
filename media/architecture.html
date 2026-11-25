@@ -11,10 +11,8 @@
 .top{flex:0 0 54px;display:flex;align-items:center;gap:14px;padding:0 22px;background:#202520;color:var(--paper);border-bottom:3px solid var(--rust)}.brand{font-size:19px;font-style:italic}.brand b{font-style:normal;color:#f6e2d5}.badge{font:10px var(--mono);border:1px solid #71523f;color:#d9bfae;padding:3px 6px}.stats{margin-left:auto;font:10px var(--mono);color:#bcc5b9}
 .lede{flex:0 0 auto;padding:20px 26px 16px;background:var(--paper2);border-bottom:1px solid var(--line)}.lede p{margin:0;max-width:1000px;font-size:17px;line-height:1.5;color:#2b332d}.lede-meta{display:flex;align-items:baseline;gap:12px;margin-top:8px}.note{font:10px var(--mono);color:var(--muted);margin:0;line-height:1.5}
 .panes{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}.pane{min-height:0;overflow:auto;padding:20px 24px 60px;background:var(--paper)}.pane+.pane{border-left:1px solid var(--line);background:var(--paper2)}.pane-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}.pane-head h2{font:11px var(--mono);margin:0;text-transform:lowercase;color:var(--rust)}.pane-sub{font:10px var(--mono);color:var(--muted)}
-.side-copy{color:#505a50;font-size:13px;margin:12px 0}.section{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.section h3{font:10px var(--mono);font-weight:600;color:var(--muted);margin:0 0 8px;text-transform:lowercase}
-.brief-item{display:block;width:100%;text-align:left;border:0;border-top:1px solid #e3e1d5;background:transparent;padding:7px 0;cursor:pointer;color:var(--ink)}.brief-item:hover{background:var(--paper3)}.brief-name{font:11px var(--mono);font-weight:600}.brief-doc{display:block;font-size:12px;color:#505a50;margin-top:2px}.carrier-meta{font:9px var(--mono);color:var(--muted)}
-.flowWrap{overflow:auto;border:1px solid var(--line);background:#ffffff;padding:14px;margin:14px 0}.flowSvg{display:block;max-width:none}.flowActions{margin-top:14px}.flowStageRow{border-top:1px solid #e3e1d5;padding:8px 0}.flowStageRow .brief-name{margin-right:8px}.flowStageRow .note{margin:4px 0 0}
-.readingStep{display:flex;gap:14px;border-top:1px solid #e3e1d5;padding:14px 0}.readingStep .stepNo{font:11px var(--mono);color:var(--rust);min-width:22px;padding-top:2px}.readingStep .stepBody{flex:1;min-width:0}.readingStep .brief-doc{margin-top:3px}.readingFiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.readingFiles button{font:10px var(--mono);background:transparent;border:1px solid var(--line);color:var(--ink);padding:4px 7px;cursor:pointer}.readingFiles button:hover{border-color:var(--rust);color:var(--rust)}.empty{font-size:12px;color:var(--muted);font-style:italic}
+.side-copy{color:#505a50;font-size:13px;margin:12px 0}.brief-item{display:block;width:100%;text-align:left;border:0;border-top:1px solid #e3e1d5;background:transparent;padding:7px 0;cursor:pointer;color:var(--ink)}.brief-item:hover{background:var(--paper3)}.brief-name{font:11px var(--mono);font-weight:600}.brief-doc{display:block;font-size:12px;color:#505a50;margin-top:2px}.carrier-meta{font:9px var(--mono);color:var(--muted)}
+.flowWrap{overflow:auto;border:1px solid var(--line);background:#ffffff;padding:14px;margin:14px 0}.flowSvg{display:block;max-width:none}.flowActions{margin-top:14px}.readingStep{display:flex;gap:14px;border-top:1px solid #e3e1d5;padding:14px 0}.readingStep .stepNo{font:11px var(--mono);color:var(--rust);min-width:22px;padding-top:2px}.readingStep .stepBody{flex:1;min-width:0}.readingStep .brief-doc{margin-top:3px}.readingFiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.readingFiles button{font:10px var(--mono);background:transparent;border:1px solid var(--line);color:var(--ink);padding:4px 7px;cursor:pointer}.readingFiles button:hover{border-color:var(--rust);color:var(--rust)}.empty{font-size:12px;color:var(--muted);font-style:italic}
 @media(max-width:900px){html,body{height:auto}body{overflow:auto}.app{height:auto;min-height:100vh}.panes{grid-template-columns:1fr}.pane{overflow:visible}.pane+.pane{border-left:0;border-top:1px solid var(--line)}.stats{display:none}}
 </style>
 </head>
@@ -54,8 +52,8 @@ function firstSentence(text){
 }
 const ledeText = document.getElementById('ledeText');
 function renderLede(){
-  const line = firstSentence(DATA.identity);
-  ledeText.textContent = line || 'No project summary is stored; run Analyze Architecture again.';
+  const line = firstSentence((flow && flow.brief) || DATA.identity);
+  ledeText.textContent = line || 'No project summary is stored; draw the run to write one.';
 }
 
 function wrapFlowTitle(title){
@@ -232,23 +230,8 @@ function renderFlow(){
     flowDoc.append(button);
     return;
   }
-  flowDoc.append(el('p','note','The label under each stage is the module that does the work; click a stage to open it. ' + (flow.generatedAt ? 'Generated ' + new Date(flow.generatedAt).toLocaleString() + '.' : '')));
+  flowDoc.append(el('p','note','The label under each stage is the module that does the work; click a stage to open it. Redrawing also rewrites the opening line. ' + (flow.generatedAt ? 'Generated ' + new Date(flow.generatedAt).toLocaleString() + '.' : '')));
   const wrap=el('div','flowWrap'); wrap.append(buildFlowSvg(flow)); flowDoc.append(wrap);
-  const list=el('section','section'); list.append(el('h3',null,'stages'));
-  for(const stage of flow.stages){
-    const row=el('div','flowStageRow');
-    row.append(el('span','brief-name',stage.title));
-    const where=el('span','carrier-meta',stage.source || stage.kind);
-    if(stage.source && stage.file){
-      where.style.cursor='pointer';
-      where.title='Open in editor';
-      where.addEventListener('click',()=>postReveal(stage.file, stage.line));
-    }
-    row.append(where);
-    if(stage.detail) row.append(el('p','note',stage.detail));
-    list.append(row);
-  }
-  flowDoc.append(list);
   const actions=el('div','flowActions');
   const redraw=el('button','brief-item','redraw');
   redraw.addEventListener('click',()=>{

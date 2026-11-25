@@ -7,7 +7,7 @@ import { FLOW_PROMPT_VERSION } from './flow';
 
 type Stored = StoredFlow & { key: string; version: number };
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 3;
 
 /** One flow diagram per workspace, keyed by revision + model + prompt version. */
 export class FlowCache {
@@ -36,6 +36,7 @@ export class FlowCache {
         title: parsed.title,
         stages: parsed.stages,
         edges: parsed.edges,
+        brief: typeof parsed.brief === 'string' ? parsed.brief : undefined,
         model: parsed.model,
         revision: parsed.revision,
         generatedAt: parsed.generatedAt

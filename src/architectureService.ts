@@ -15,7 +15,7 @@ import { OverviewSymbol } from './contract';
 import { OverviewService } from './overviewLens';
 import { crateRoot, readCrateName } from './project';
 
-const CACHE_VERSION = 25;
+const CACHE_VERSION = 26;
 const CALL_TIMEOUT_MS = 4000;
 const MAX_CALLER_LOOKUPS = 300;
 const REFERENCE_TIMEOUT_MS = 5000;

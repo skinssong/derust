@@ -40,6 +40,8 @@ export type FlowSpec = {
   title: string;
   stages: FlowStage[];
   edges: FlowEdge[];
+  /** Opening line written from the stages; absent on flows drawn before it. */
+  brief?: string;
 };
 
 export type StoredFlow = FlowSpec & {
