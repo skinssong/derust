@@ -139,10 +139,6 @@ function render(
     path.join(extensionUri.fsPath, 'media', 'architecture.html'),
     'utf8'
   );
-  const cytoscape = fs.readFileSync(
-    path.join(extensionUri.fsPath, 'media', 'cytoscape.min.js'),
-    'utf8'
-  );
   const nonce = crypto.randomBytes(16).toString('base64');
   const data = JSON.stringify(model).replace(/<\//g, '<\\/');
   const narrativeJson = JSON.stringify(narrative ?? null).replace(/<\//g, '<\\/');
@@ -151,7 +147,6 @@ function render(
   return template
     .replace('__CSP__', () => `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';`)
     .replace(/__NONCE__/g, () => nonce)
-    .replace('__CYTOSCAPE__', () => cytoscape)
     .replace('__DATA__', () => data)
     .replace('__NARRATIVE__', () => narrativeJson)
     .replace('__FLOW__', () => flowJson)

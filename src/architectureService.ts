@@ -12,11 +12,10 @@ import {
   useLineSet
 } from './architecture';
 import { OverviewSymbol } from './contract';
-import { layoutArchitecture } from './elkLayout';
 import { OverviewService } from './overviewLens';
 import { crateRoot, readCrateName } from './project';
 
-const CACHE_VERSION = 24;
+const CACHE_VERSION = 25;
 const CALL_TIMEOUT_MS = 4000;
 const MAX_CALLER_LOOKUPS = 300;
 const REFERENCE_TIMEOUT_MS = 5000;
@@ -177,9 +176,8 @@ export class ArchitectureService {
       )
     }));
 
-    progress.report({ message: 'laying out components', increment: 5 });
     const crate = (await readCrateName(uri)) ?? path.basename(root.fsPath);
-    let model = buildArchitecture({
+    const model = buildArchitecture({
       revision,
       crate,
       root: root.fsPath,
@@ -187,11 +185,6 @@ export class ArchitectureService {
       sources,
       dependencies: readDependencies(root)
     });
-    try {
-      model = await layoutArchitecture(model);
-    } catch (error) {
-      this.output.appendLine(`[architecture] ELK layout failed: ${messageOf(error)}`);
-    }
     this.saveCache(root, revision, model);
     this.output.appendLine(
       `[architecture] ${model.meta.components} components, ${model.meta.edges} edges, ` +

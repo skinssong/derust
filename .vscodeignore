@@ -37,8 +37,3 @@ media/icon.svg
 media/interactive-architecture-spike.html
 out/architecture-inference-*
 out/light-*
-!node_modules/elkjs/package.json
-!node_modules/elkjs/lib/elk.bundled.js
-!node_modules/elkjs/lib/elk.bundled.d.ts
-!node_modules/elkjs/LICENSE.md
-!node_modules/elkjs/README.md

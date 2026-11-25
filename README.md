@@ -212,6 +212,6 @@ Derust began as a fork of
 the upstream project is credited in `NOTICE`. The ownership timeline is
 inspired by [RustViz](https://github.com/rustviz/rustviz), and the stack/heap
 snapshot by [Aquascope](https://github.com/cognitive-engineering-lab/aquascope).
-Neither project is affiliated with or endorses Derust. The architecture view
-bundles Cytoscape.js (MIT) and elkjs (EPL-2.0). See `NOTICE` for the full
+Neither project is affiliated with or endorses Derust. The project view
+bundles no third-party visualization library. See `NOTICE` for the full
 credits and licenses.

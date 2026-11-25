@@ -22,15 +22,6 @@ export type ArchSymbol = {
 
 export type ArchRole = 'data' | 'behavior' | 'mixed' | 'empty';
 
-export type NodeSizeClass = 'small' | 'medium' | 'large';
-
-/** Fixed boxes per size class; the contrast is deliberate. */
-export const NODE_BOX: Record<NodeSizeClass, { w: number; h: number }> = {
-  small: { w: 96, h: 40 },
-  medium: { w: 152, h: 54 },
-  large: { w: 208, h: 70 }
-};
-
 export type ArchComponent = {
   id: string;
   label: string;
@@ -46,9 +37,6 @@ export type ArchComponent = {
   callSites: number;
   incomingCalls: number;
   incomingComponents: number;
-  sizeClass: NodeSizeClass;
-  w: number;
-  h: number;
 };
 
 export type ArchEdge = {
@@ -57,10 +45,6 @@ export type ArchEdge = {
   label: string;
   kinds: Record<string, number>;
   occurrences: ArchOccurrence[];
-  /** Orthogonal bend points as segment weights/distances, relative to the
-   * source and target node positions. Filled by the ELK layout pass. */
-  segW?: number[];
-  segD?: number[];
 };
 
 export type BriefModule = {
@@ -68,7 +52,6 @@ export type BriefModule = {
   file: string;
   description: string;
   role: ArchRole;
-  sizeClass: NodeSizeClass;
   codeLines: number;
   callSites: number;
   incomingCalls: number;
@@ -121,7 +104,6 @@ export type ArchitectureModel = {
   };
   nodes: ArchComponent[];
   edges: ArchEdge[];
-  positions: Record<string, [number, number]>;
   brief: ProjectBrief;
   /** Comment-free excerpts of the highest-signal source files, for the
    * deeper-dive narrative. */
@@ -527,10 +509,6 @@ export function buildArchitecture(input: ArchitectureInput): ArchitectureModel {
       )
     );
   }
-  const sizeClassById = new Map<string, NodeSizeClass>();
-  const classes = sizeClasses(ids.map((id) => codeLinesById.get(id) ?? 0));
-  ids.forEach((id, index) => sizeClassById.set(id, classes[index]));
-
   const nodes: ArchComponent[] = ids.map((id) => {
     const entry = components.get(id)!;
     const typed = (hasTypes.get(id) || 0) > 0;
@@ -544,8 +522,6 @@ export function buildArchitecture(input: ArchitectureInput): ArchitectureModel {
           : typed
             ? 'data'
             : 'behavior';
-    const sizeClass = sizeClassById.get(id) ?? 'small';
-    const size = NODE_BOX[sizeClass];
     return {
       id,
       label: id,
@@ -556,10 +532,7 @@ export function buildArchitecture(input: ArchitectureInput): ArchitectureModel {
       dependencies: (dependencySets.get(id) ?? new Set<string>()).size,
       callSites: callSites.get(id) ?? 0,
       incomingCalls: targetCallSites.get(id) ?? 0,
-      incomingComponents: (targetCallers.get(id) ?? new Set<string>()).size,
-      sizeClass,
-      w: size.w,
-      h: size.h
+      incomingComponents: (targetCallers.get(id) ?? new Set<string>()).size
     };
   });
 
@@ -586,7 +559,6 @@ export function buildArchitecture(input: ArchitectureInput): ArchitectureModel {
     },
     nodes,
     edges: edgeList,
-    positions: layeredPositions(ids, edgeList),
     codeSample,
     brief: buildProjectBrief(
       input.crate,
@@ -971,7 +943,6 @@ function buildProjectBrief(
     file: primaryFile(node.modules),
     description: moduleDescription(node),
     role: node.role,
-    sizeClass: node.sizeClass,
     codeLines: node.codeLines,
     callSites: node.callSites,
     incomingCalls: node.incomingCalls,
@@ -1364,81 +1335,6 @@ function buildProjectBrief(
   };
 }
 
-/** Three size classes by 1-D clustering over code lines, so the steps fall
- * on natural gaps rather than at an arbitrary third. Deterministic: seeded
- * at the means of the sorted thirds, lower-index ties. */
-export function sizeClasses(values: number[]): NodeSizeClass[] {
-  const n = values.length;
-  if (n === 0) {
-    return [];
-  }
-  if (n <= 2) {
-    return values.map((_, index) =>
-      index === 0 ? 'small' : n === 1 ? 'small' : 'medium'
-    );
-  }
-  const sorted = values.slice().sort((left, right) => left - right);
-  const mean = (items: number[]): number =>
-    items.reduce((sum, value) => sum + value, 0) / items.length;
-  const firstCut = Math.ceil(n / 3);
-  const secondCut = Math.ceil((n * 2) / 3);
-  let centroids = [
-    mean(sorted.slice(0, firstCut)),
-    mean(sorted.slice(firstCut, secondCut)),
-    mean(sorted.slice(secondCut))
-  ];
-  let assignment = values.map(() => 0);
-  for (let guard = 0; guard < 20; guard += 1) {
-    const next = values.map((value) => {
-      let best = 0;
-      let bestDistance = Infinity;
-      centroids.forEach((centroid, index) => {
-        const distance = Math.abs(value - centroid);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = index;
-        }
-      });
-      return best;
-    });
-    assignment = next;
-    const sums = [0, 0, 0];
-    const counts = [0, 0, 0];
-    values.forEach((value, index) => {
-      sums[assignment[index]] += value;
-      counts[assignment[index]] += 1;
-    });
-    if (counts.some((count) => count === 0)) {
-      break;
-    }
-    const updated = sums.map((sum, index) => sum / counts[index]);
-    const stable =
-      updated.every((centroid, index) => Math.abs(centroid - centroids[index]) < 1e-9) &&
-      assignment.every((cluster, index) => cluster === next[index]);
-    centroids = updated;
-    if (stable) {
-      break;
-    }
-  }
-  const clusterCounts = [0, 0, 0];
-  assignment.forEach((cluster) => {
-    clusterCounts[cluster] += 1;
-  });
-  if (clusterCounts.some((count) => count === 0)) {
-    const order = values
-      .map((value, index) => ({ value, index }))
-      .sort((left, right) => left.value - right.value || left.index - right.index);
-    const classes: NodeSizeClass[] = new Array(n);
-    order.forEach((item, rank) => {
-      classes[item.index] =
-        rank < n / 3 ? 'small' : rank < (n * 2) / 3 ? 'medium' : 'large';
-    });
-    return classes;
-  }
-  return assignment.map((cluster) =>
-    cluster === 0 ? 'small' : cluster === 1 ? 'medium' : 'large'
-  );
-}
 
 export function isTypeKind(kind: string): boolean {
   return kind === 'struct' || kind === 'enum' || kind === 'trait' || kind === 'type';
@@ -1705,164 +1601,3 @@ function dedupeOccurrences(occurrences: ArchOccurrence[]): ArchOccurrence[] {
   return result;
 }
 
-/** Deterministic layered placement: cycle-breaking ranks nodes by longest
- * path from the roots, and barycentre ordering keeps orthogonal edges short. */
-export function layeredPositions(
-  ids: string[],
-  edges: Array<{ source: string; target: string }>
-): Record<string, [number, number]> {
-  const order = new Map(ids.map((id, i) => [id, i]));
-  const succ = new Map<string, string[]>();
-  const pred = new Map<string, string[]>();
-  for (const id of ids) {
-    succ.set(id, []);
-    pred.set(id, []);
-  }
-  for (const edge of edges) {
-    if (!succ.has(edge.source) || !succ.has(edge.target)) {
-      continue;
-    }
-    succ.get(edge.source)!.push(edge.target);
-    pred.get(edge.target)!.push(edge.source);
-  }
-
-  // Break cycles the way layered drawing does: a DFS marks the edges that
-  // point back up the current path, and those are ignored for ranking.
-  const indegreeAll = new Map<string, number>();
-  for (const id of ids) {
-    indegreeAll.set(id, 0);
-  }
-  for (const edge of edges) {
-    if (indegreeAll.has(edge.target)) {
-      indegreeAll.set(edge.target, indegreeAll.get(edge.target)! + 1);
-    }
-  }
-  const rootWeight = (id: string): number => {
-    if (id === 'main' || id === 'lib') {
-      return 0;
-    }
-    return indegreeAll.get(id) === 0 ? 1 : 2;
-  };
-  const dfsOrder = ids
-    .slice()
-    .sort((left, right) => rootWeight(left) - rootWeight(right) || order.get(left)! - order.get(right)!);
-
-  const visited = new Set<string>();
-  const onPath = new Set<string>();
-  const backEdges = new Set<string>();
-  const dfs = (node: string): void => {
-    visited.add(node);
-    onPath.add(node);
-    for (const next of succ.get(node) ?? []) {
-      if (onPath.has(next)) {
-        backEdges.add(`${node}\0${next}`);
-        continue;
-      }
-      if (!visited.has(next)) {
-        dfs(next);
-      }
-    }
-    onPath.delete(node);
-  };
-  for (const id of dfsOrder) {
-    if (!visited.has(id)) {
-      dfs(id);
-    }
-  }
-
-  const indegree = new Map<string, number>();
-  for (const id of ids) {
-    indegree.set(id, 0);
-  }
-  for (const edge of edges) {
-    if (!succ.has(edge.source) || !succ.has(edge.target) || backEdges.has(`${edge.source}\0${edge.target}`)) {
-      continue;
-    }
-    indegree.set(edge.target, indegree.get(edge.target)! + 1);
-  }
-  const rank = new Map<string, number>();
-  for (const id of ids) {
-    rank.set(id, 0);
-  }
-  const queue: string[] = [];
-  for (const id of ids) {
-    if (indegree.get(id) === 0) {
-      queue.push(id);
-    }
-  }
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    for (const next of succ.get(current) ?? []) {
-      if (backEdges.has(`${current}\0${next}`)) {
-        continue;
-      }
-      rank.set(next, Math.max(rank.get(next)!, rank.get(current)! + 1));
-      indegree.set(next, indegree.get(next)! - 1);
-      if (indegree.get(next) === 0) {
-        queue.push(next);
-      }
-    }
-  }
-
-  const layers = new Map<number, string[]>();
-  for (const id of ids) {
-    const r = rank.get(id) ?? 0;
-    if (!layers.has(r)) {
-      layers.set(r, []);
-    }
-    layers.get(r)!.push(id);
-  }
-  for (const list of layers.values()) {
-    list.sort((left, right) => order.get(left)! - order.get(right)!);
-  }
-
-  const snapshot = (r: number): Map<string, number> =>
-    new Map(layers.get(r)!.map((id, i) => [id, i]));
-
-  for (let pass = 0; pass < 4; pass += 1) {
-    const ranks = Array.from(layers.keys()).sort((a, b) => a - b);
-    for (const r of ranks) {
-      if (!layers.has(r - 1)) {
-        continue;
-      }
-      const here = snapshot(r);
-      const prev = snapshot(r - 1);
-      const upstream = (id: string): number => {
-        const links = (pred.get(id) ?? [])
-          .filter((name) => prev.has(name))
-          .map((name) => prev.get(name)!);
-        return links.length > 0 ? average(links) : here.get(id)!;
-      };
-      layers.get(r)!.sort((left, right) => upstream(left) - upstream(right) || order.get(left)! - order.get(right)!);
-    }
-    for (const r of ranks.slice().reverse()) {
-      if (!layers.has(r + 1)) {
-        continue;
-      }
-      const here = snapshot(r);
-      const next = snapshot(r + 1);
-      const downstream = (id: string): number => {
-        const links = (succ.get(id) ?? [])
-          .filter((name) => next.has(name))
-          .map((name) => next.get(name)!);
-        return links.length > 0 ? average(links) : here.get(id)!;
-      };
-      layers.get(r)!.sort((left, right) => downstream(left) - downstream(right) || order.get(left)! - order.get(right)!);
-    }
-  }
-
-  const positions: Record<string, [number, number]> = {};
-  for (const [r, list] of layers) {
-    for (let i = 0; i < list.length; i += 1) {
-      positions[list[i]] = [
-        120 + r * 280,
-        Math.round(350 + (i - (list.length - 1) / 2) * 160)
-      ];
-    }
-  }
-  return positions;
-}
-
-function average(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}

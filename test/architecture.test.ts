@@ -8,8 +8,6 @@ import {
   isDefinitionLine,
   isModuleWiring,
   isUseLine,
-  layeredPositions,
-  sizeClasses,
   useLineSet
 } from '../src/architecture';
 
@@ -92,35 +90,9 @@ test('architecture groups modules into components and edges from usages', () => 
     model.edges.some((item) => item.source === item.target),
     false
   );
-  assert.ok(model.positions.main && model.positions.log);
 });
 
-test('layout is deterministic and ranks dependencies to the right', () => {
-  const ids = ['main', 'agent', 'log', 'tools'];
-  const edges = [
-    { source: 'main', target: 'agent' },
-    { source: 'agent', target: 'log' },
-    { source: 'main', target: 'tools' }
-  ];
-  const first = layeredPositions(ids, edges);
-  const second = layeredPositions(ids, edges);
-  assert.deepEqual(first, second);
-  assert.ok(first.main[0] < first.agent[0]);
-  assert.ok(first.agent[0] < first.log[0]);
-  assert.ok(first.main[0] < first.tools[0]);
-});
 
-test('a reference cycle breaks into a left-to-right chain', () => {
-  const ids = ['a', 'b', 'c'];
-  const positions = layeredPositions(ids, [
-    { source: 'a', target: 'b' },
-    { source: 'b', target: 'a' },
-    { source: 'b', target: 'c' }
-  ]);
-  assert.ok(positions.a && positions.b && positions.c);
-  assert.ok(positions.a[0] < positions.b[0]);
-  assert.ok(positions.b[0] < positions.c[0]);
-});
 
 test('code lines exclude comments, doc comments and nested blocks', () => {
   assert.equal(
@@ -376,7 +348,6 @@ test('an orphan wiring module is dropped from the diagram', () => {
   });
   const ids = model.nodes.map((node) => node.id);
   assert.deepEqual(ids, ['a', 'b']);
-  assert.equal(model.positions.lib, undefined);
 });
 
 test('a lib module with real code stays', () => {
@@ -401,49 +372,7 @@ test('use lines include continuation lines of a multi-line import', () => {
   assert.deepEqual([...set].sort((left, right) => left - right), [1, 2, 3, 4]);
 });
 
-test('node sizes are three deterministic tercile classes', () => {
-  assert.deepEqual(sizeClasses([10, 100, 200, 300, 400, 500]), [
-    'small',
-    'small',
-    'medium',
-    'medium',
-    'large',
-    'large'
-  ]);
-  assert.deepEqual(sizeClasses([42]), ['small']);
-  assert.deepEqual(sizeClasses([5, 9]), ['small', 'medium']);
-});
 
-test('components carry size classes and fixed boxes', () => {
-  const code = (count: number): string[] => Array.from({ length: count }, () => 'let x = 1;');
-  const model = buildArchitecture({
-    revision: 'r',
-    crate: 'demo',
-    root: '/demo',
-    sources: {
-      'src/small.rs': code(20),
-      'src/medium.rs': code(120),
-      'src/large.rs': code(400)
-    },
-    symbols: [
-      { file: 'src/small.rs', name: 'S', kind: 'struct', start: 1, end: 1, occurrences: [] },
-      { file: 'src/medium.rs', name: 'M', kind: 'struct', start: 1, end: 1, occurrences: [] },
-      { file: 'src/large.rs', name: 'L', kind: 'struct', start: 1, end: 1, occurrences: [] }
-    ]
-  });
-  const byId = new Map(model.nodes.map((node) => [node.id, node]));
-  assert.equal(byId.get('small')!.sizeClass, 'small');
-  assert.equal(byId.get('medium')!.sizeClass, 'medium');
-  assert.equal(byId.get('large')!.sizeClass, 'large');
-  assert.deepEqual(
-    [byId.get('small')!.w, byId.get('medium')!.w, byId.get('large')!.w],
-    [96, 152, 208]
-  );
-  assert.deepEqual(
-    [byId.get('small')!.h, byId.get('medium')!.h, byId.get('large')!.h],
-    [40, 54, 70]
-  );
-});
 
 test('project brief: purpose, reading order, docs and carriers', () => {
   const sources: Record<string, string[]> = {

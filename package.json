@@ -262,6 +262,5 @@
     }
   },
   "dependencies": {
-    "elkjs": "^0.12.1"
   }
 }
