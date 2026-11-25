@@ -230,6 +230,7 @@ function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
 <title>Derust</title>
 </head>
 <body>
+<header class="top"><div class="brand">Derust</div><nav class="views" id="views"><button data-view="project">Project</button><span class="slash">/</span><button data-view="file" class="active">File</button></nav></header>
 <div id="app"></div>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

@@ -8,7 +8,7 @@
 <style>
 :root{--ink:var(--vscode-foreground,#1e2320);--paper:var(--vscode-editor-background,#f2f3ed);--paper2:var(--vscode-sideBar-background,#f8f6ee);--paper3:var(--vscode-editorWidget-background,#ebe9dd);--line:var(--vscode-panel-border,#d1d2c5);--muted:var(--vscode-descriptionForeground,#647064);--rust:var(--vscode-textLink-foreground,#a8431f);--amber:var(--vscode-editorWarning-foreground,#b4652f);--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--mono:var(--vscode-editor-font-family,"SF Mono",Menlo,Consolas,monospace)}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);font:14px/1.45 var(--serif)}body{overflow:hidden}.app{height:100vh;display:flex;flex-direction:column}
-.top{flex:0 0 54px;display:flex;align-items:center;gap:14px;padding:0 22px;background:var(--vscode-titleBar-activeBackground,#202520);color:var(--vscode-titleBar-activeForeground,var(--paper));border-bottom:2px solid var(--rust)}.brand{font-size:19px;font-style:italic}.brand b{font-style:normal;color:var(--rust)}.badge{font:10px var(--mono);border:1px solid var(--line);color:var(--vscode-titleBar-activeForeground,var(--muted));opacity:.8;padding:3px 6px}.stats{margin-left:auto;font:10px var(--mono);color:var(--vscode-titleBar-activeForeground,var(--muted));opacity:.8}.viewSwitch{display:flex;border:1px solid var(--line)}.viewSwitch button{font:10px var(--mono);text-transform:lowercase;background:transparent;border:0;color:var(--vscode-titleBar-activeForeground,var(--muted));opacity:.8;padding:4px 9px;cursor:pointer}.viewSwitch button+button{border-left:1px solid var(--line)}.viewSwitch button.active{background:var(--vscode-button-secondaryBackground,rgba(128,128,128,.2));color:var(--vscode-button-secondaryForeground,var(--ink));opacity:1}
+.top{flex:0 0 50px;display:flex;align-items:center;gap:16px;padding:0 18px;background:var(--vscode-titleBar-activeBackground,#202520);color:var(--vscode-titleBar-activeForeground,var(--paper));border-bottom:1px solid var(--vscode-panel-border,var(--line))}.brand{font-size:15px;font-weight:600}.views{display:flex;align-items:baseline;gap:2px}.views button{font:12px var(--mono);background:transparent;border:0;border-bottom:2px solid transparent;color:var(--vscode-titleBar-activeForeground,var(--muted));opacity:.65;padding:3px 2px;cursor:pointer;text-align:left}.views button.active{opacity:1;border-bottom-color:var(--rust)}.views button:disabled{opacity:.3;cursor:default}.views .slash{font:12px var(--mono);opacity:.4}.stats{margin-left:auto;font:10px var(--mono);color:var(--vscode-titleBar-activeForeground,var(--muted));opacity:.8}
 .lede{flex:0 0 auto;padding:20px 26px 16px;background:var(--paper2);border-bottom:1px solid var(--line)}.lede p{margin:0;max-width:1000px;font-size:17px;line-height:1.5;color:var(--ink)}.lede-meta{display:flex;align-items:baseline;gap:12px;margin-top:8px}.note{font:10px var(--mono);color:var(--muted);margin:0;line-height:1.5}
 .panes{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}.pane{min-height:0;overflow:auto;padding:20px 24px 60px;background:var(--paper)}.pane+.pane{border-left:1px solid var(--line);background:var(--paper2)}.pane-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}.pane-head h2{font:11px var(--mono);margin:0;text-transform:lowercase;color:var(--rust)}.pane-sub{font:10px var(--mono);color:var(--muted)}
 .side-copy{color:#505a50;font-size:13px;margin:12px 0}.brief-item{display:block;width:100%;text-align:left;border:0;border-top:1px solid #e3e1d5;background:transparent;padding:7px 0;cursor:pointer;color:var(--ink)}.brief-item:hover{background:var(--paper3)}.brief-name{font:11px var(--mono);font-weight:600}.brief-doc{display:block;font-size:12px;color:#505a50;margin-top:2px}.carrier-meta{font:9px var(--mono);color:var(--muted)}
@@ -18,7 +18,7 @@
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><b>Derust</b> Project</div><span class="badge">workspace</span><div class="viewSwitch" id="viewSwitch"><button data-view="project" class="active">project</button><button data-view="file">file</button></div><div class="stats" id="stats"></div></header>
+<header class="top"><div class="brand">Derust</div><nav class="views" id="viewSwitch"><button data-view="project" class="active">Project</button><span class="slash">/</span><button data-view="file" id="fileTab">File</button></nav><div class="stats" id="stats"></div></header>
 <div class="lede"><p id="ledeText"></p></div>
 <div class="panes">
   <section class="pane" id="flowPane"><div class="pane-head"><h2>flow</h2><span class="pane-sub">one normal run · steps, branches, loop</span></div><div id="flowDoc"></div></section>
@@ -34,13 +34,21 @@ let readingError = null;
 let flow = FLOW;
 let flowError = null;
 let flowDrawing = __AUTODRAW__;
+let fileAvailable = __FILEAVAILABLE__;
 const vscodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
 const viewSwitch = document.getElementById('viewSwitch');
+const fileTab = document.getElementById('fileTab');
+function applyFileAvailability(){
+  fileTab.disabled = !fileAvailable;
+  fileTab.title = fileAvailable ? '' : 'Open a Rust file first';
+}
+applyFileAvailability();
 viewSwitch.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-view]');
   if (!button || button.dataset.view === 'project' || !vscodeApi) return;
-  vscodeApi.postMessage({ type: 'switchView', view: button.dataset.view });
+  if (!fileAvailable) return;
+  vscodeApi.postMessage({ type: 'switchView', view: 'file' });
 });
 const stats = document.getElementById('stats');
 stats.textContent = `${DATA.meta.crate ? DATA.meta.crate + ' · ' : ''}${DATA.meta.components} components · ${DATA.meta.indexedReferences} indexed references · ${DATA.meta.edges} links · rev ${String(DATA.meta.revision).slice(0, 16)}`;
@@ -312,21 +320,53 @@ window.addEventListener('message',(event)=>{
     flow = message.flow; flowError = null; flowDrawing = false;
     renderFlow();
     renderLede();
+  } else if(message.type === 'fileAvailability' && typeof message.available === 'boolean'){
+    fileAvailable = message.available;
+    applyFileAvailability();
   } else if(message.type === 'flowError' && typeof message.message === 'string'){
     flowError = message.message; flowDrawing = false;
     renderFlow();
   } else if(message.type === 'reading' && message.reading){
     reading = message.reading; readingError = null;
     renderReading();
+    restoreScroll();
   } else if(message.type === 'readingError' && typeof message.message === 'string'){
     readingError = message.message;
     renderReading();
   }
 });
 
+const flowPane = document.getElementById('flowPane');
+const readingPane = document.getElementById('readingPane');
+const SCROLL_KEY = 'derust:project-scroll:' + (DATA.meta.crate || 'project');
+function saveScroll(){
+  try {
+    localStorage.setItem(SCROLL_KEY, JSON.stringify({
+      left: flowPane.scrollTop,
+      right: readingPane.scrollTop,
+      y: window.scrollY
+    }));
+  } catch {}
+}
+flowPane.addEventListener('scroll', saveScroll, { passive: true });
+readingPane.addEventListener('scroll', saveScroll, { passive: true });
+window.addEventListener('scroll', saveScroll, { passive: true });
+function restoreScroll(){
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCROLL_KEY) || 'null');
+    if (!saved) return;
+    requestAnimationFrame(() => {
+      flowPane.scrollTop = saved.left || 0;
+      readingPane.scrollTop = saved.right || 0;
+      window.scrollTo(0, saved.y || 0);
+    });
+  } catch {}
+}
+
 renderLede();
 renderFlow();
 renderReading();
+restoreScroll();
 </script>
 </body>
 </html>

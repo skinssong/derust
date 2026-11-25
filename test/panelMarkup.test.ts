@@ -27,8 +27,15 @@ test('both views expose the project and file switch', () => {
     path.join(__dirname, '..', '..', 'media', 'panel.js'),
     'utf8'
   );
-  assert.match(html, /type: 'switchView', view: button\.dataset\.view/);
+  assert.match(html, /type: 'switchView', view: 'file'/);
   assert.match(panelJs, /type: 'switchView', view: 'project'/);
+  assert.match(html, /<nav class="views"/);
+  assert.ok(html.includes('__FILEAVAILABLE__'));
+  const panelTs = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'panel.ts'),
+    'utf8'
+  );
+  assert.match(panelTs, /<nav class="views"/);
   assert.ok(!panelJs.includes("'Import .env'"));
   assert.ok(!panelJs.includes("type: 'importEnv'"));
 });

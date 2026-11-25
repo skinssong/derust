@@ -2,7 +2,7 @@
   "name": "derust",
   "displayName": "Derust",
   "description": "AI-generated, line-anchored readings of Rust: module operations, function walkthroughs, spotlights, and ownership.",
-  "version": "0.28.11",
+  "version": "0.28.12",
   "publisher": "rsong",
   "icon": "media/icon.png",
   "license": "MIT",

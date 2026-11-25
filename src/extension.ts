@@ -138,7 +138,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeTextEditorSelection((event) => handleSelection(event)),
     vscode.window.onDidChangeTextEditorVisibleRanges((event) => handleVisibleRanges(event)),
     vscode.workspace.onDidChangeTextDocument((event) => handleDocumentChanged(event)),
-    vscode.window.onDidChangeActiveTextEditor((editor) => handleActiveEditor(editor)),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      handleActiveEditor(editor);
+      if (PanelHost.view === 'project') {
+        ArchitecturePanel.postFileAvailability(fileViewAvailable());
+      }
+    }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('derust.overviewGlance')) {
         overviewLens?.refresh();
@@ -532,7 +537,8 @@ async function analyzeArchitecture(): Promise<void> {
       },
       cachedFlow,
       cachedReading,
-      autoDraw
+      autoDraw,
+      fileViewAvailable()
     );
     if (autoDraw) {
       void writeFlow();
@@ -1474,6 +1480,11 @@ async function restoreLastAnalysis(context: vscode.ExtensionContext, force: bool
     output.appendLine(`[restore] ${messageOf(error)}`);
     return false;
   }
+}
+
+function fileViewAvailable(): boolean {
+  const editor = vscode.window.activeTextEditor;
+  return Boolean(panel && !panel.isDisposed) || editor?.document.languageId === 'rust';
 }
 
 function switchPanelView(view: PanelView): void {

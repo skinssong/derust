@@ -53,7 +53,7 @@ regenerated.
 From the Marketplace, search for **Derust**, or install the local VSIX:
 
 ```bash
-code --install-extension release/derust-0.28.11.vsix
+code --install-extension release/derust-0.28.12.vsix
 ```
 
 For development, open this folder in VS Code and press `F5`.
@@ -118,11 +118,13 @@ The panel header shows the file, model, line count, and reading state. Its
 **Read & Analyze** / **Re-analyze** button is the single action for the current
 file. In Spotlights, a **Cards/Columns** button switches the layout.
 
-The file reading and the project view share one **Derust** panel. A
-**project | file** switch in either header moves between them: **project** holds
-the crate's opening line, flow and reading order, **file** holds the current
-file's overview, spotlights and ownership. Opening a file from the project view
-(which the flow stages and reading steps do) lands in the file view.
+The file reading and the project view share one **Derust** panel. Its header
+reads **Derust Project / File**: clicking either name switches views, and the
+header keeps its place across the switch. **File** is greyed out until a Rust
+file is open. **Project** holds the crate's opening line, flow and reading
+order; **File** holds the current file's overview, spotlights and ownership.
+Opening a file from the project view (which the flow stages and reading steps
+do) lands in the file view, and each view restores its own scroll position.
 
 ### Overview
 

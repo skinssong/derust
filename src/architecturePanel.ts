@@ -23,6 +23,7 @@ export class ArchitecturePanel {
         flow?: FlowSpec;
         reading?: ReadingSpec;
         autoDraw: boolean;
+        fileAvailable: boolean;
       }
     | undefined;
 
@@ -32,12 +33,23 @@ export class ArchitecturePanel {
     handlers?: ArchitectureHandlers,
     flow?: FlowSpec,
     reading?: ReadingSpec,
-    autoDraw = false
+    autoDraw = false,
+    fileAvailable = false
   ): void {
     ArchitecturePanel.handlers = handlers;
     ArchitecturePanel.root = model.meta.root;
-    ArchitecturePanel.last = { context, model, flow, reading, autoDraw };
+    ArchitecturePanel.last = { context, model, flow, reading, autoDraw, fileAvailable };
     ArchitecturePanel.renderLast(autoDraw);
+  }
+
+  static postFileAvailability(available: boolean): void {
+    if (!ArchitecturePanel.last) {
+      return;
+    }
+    ArchitecturePanel.last.fileAvailable = available;
+    if (PanelHost.view === 'project') {
+      PanelHost.post({ type: 'fileAvailability', available });
+    }
   }
 
   static hasContent(): boolean {
@@ -103,7 +115,8 @@ export class ArchitecturePanel {
       last.model,
       last.flow,
       last.reading,
-      autoDraw
+      autoDraw,
+      last.fileAvailable
     );
     PanelHost.reveal(false);
   }
@@ -155,7 +168,8 @@ function render(
   model: ArchitectureModel,
   flow?: FlowSpec,
   reading?: ReadingSpec,
-  autoDraw = false
+  autoDraw = false,
+  fileAvailable = false
 ): string {
   const template = fs.readFileSync(
     path.join(extensionUri.fsPath, 'media', 'architecture.html'),
@@ -172,6 +186,7 @@ function render(
     .replace('__CSP__', () => `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';`)
     .replace(/__NONCE__/g, () => nonce)
     .replace('__AUTODRAW__', () => (autoDraw ? 'true' : 'false'))
+    .replace('__FILEAVAILABLE__', () => (fileAvailable ? 'true' : 'false'))
     .replace('__DATA__', () => data)
     .replace('__FLOW__', () => flowJson)
     .replace('__READING__', () => readingJson);

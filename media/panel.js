@@ -3,6 +3,15 @@
 const vscode = acquireVsCodeApi();
 const app = document.getElementById('app');
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const shellViews = document.getElementById('views');
+if (shellViews) {
+  shellViews.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-view]');
+    if (button && button.dataset.view === 'project') {
+      vscode.postMessage({ type: 'switchView', view: 'project' });
+    }
+  });
+}
 
 const state = {
   file: '',
@@ -22,6 +31,41 @@ const state = {
 
 let ignoreScrollUntil = 0;
 let scrollTimer = null;
+const SCROLL_PREFIX = 'derust:file-scroll:';
+let restoreScrollFor = null;
+let scrollSaveTimer = null;
+
+window.addEventListener('scroll', () => {
+  if (!state.file || scrollSaveTimer) return;
+  scrollSaveTimer = setTimeout(() => {
+    scrollSaveTimer = null;
+    try {
+      localStorage.setItem(SCROLL_PREFIX + state.file, String(window.scrollY));
+    } catch {}
+  }, 150);
+}, { passive: true });
+
+window.addEventListener('pagehide', () => {
+  if (!state.file) return;
+  try {
+    localStorage.setItem(SCROLL_PREFIX + state.file, String(window.scrollY));
+  } catch {}
+});
+
+function scheduleRestore(file) {
+  restoreScrollFor = file;
+}
+
+function applyRestore() {
+  if (!restoreScrollFor || restoreScrollFor !== state.file) return;
+  const file = restoreScrollFor;
+  restoreScrollFor = null;
+  let y = 0;
+  try {
+    y = Number(localStorage.getItem(SCROLL_PREFIX + file) || 0);
+  } catch {}
+  requestAnimationFrame(() => window.scrollTo(0, y || 0));
+}
 
 window.addEventListener('message', (event) => {
   const message = event.data;
@@ -40,6 +84,7 @@ window.addEventListener('message', (event) => {
     if (previousFile !== state.file) {
       state.lens = 'overview';
       clearBriefState();
+      scheduleRestore(state.file);
     }
     render();
     resetScroll();
@@ -59,6 +104,7 @@ window.addEventListener('message', (event) => {
     }
     if (fileChanged) {
       clearBriefState();
+      scheduleRestore(state.file);
     }
 
     if (fileChanged || state.lens === 'overview') {
@@ -171,6 +217,7 @@ function render() {
     empty.append(button);
     shell.append(empty);
     app.append(shell);
+    applyRestore();
     return;
   }
 
@@ -190,7 +237,9 @@ function render() {
   shell.append(content);
   app.append(shell);
   applyCursor();
+  applyRestore();
 }
+
 
 function renderHeader() {
   const header = el('header', 'head');
@@ -240,12 +289,6 @@ function renderHeader() {
   );
   controls.append(reanalyze);
 
-  const views = el('div', 'viewswitch');
-  const projectTab = el('button', null, 'project');
-  projectTab.addEventListener('click', () => vscode.postMessage({ type: 'switchView', view: 'project' }));
-  const fileTab = el('button', 'active', 'file');
-  views.append(projectTab, fileTab);
-  controls.prepend(views);
 
   const layout = el('button', null, state.layout === 'columns' ? 'Cards' : 'Columns');
   layout.addEventListener('click', () => {

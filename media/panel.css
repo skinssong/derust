@@ -66,14 +66,66 @@ button:focus-visible {
 }
 
 .shell {
-  min-height: 100vh;
+  min-height: calc(100vh - 50px);
   display: flex;
   flex-direction: column;
 }
 
-.head {
+.top {
   position: sticky;
   top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 50px;
+  padding: 0 18px;
+  background: var(--vscode-titleBar-activeBackground, var(--bg));
+  color: var(--vscode-titleBar-activeForeground, var(--fg));
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.views {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.views button {
+  font: 12px var(--mono);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--vscode-titleBar-activeForeground, var(--muted));
+  opacity: 0.65;
+  padding: 3px 2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.views button.active {
+  opacity: 1;
+  border-bottom-color: var(--accent);
+}
+
+.views button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.views .slash {
+  font: 12px var(--mono);
+  opacity: 0.4;
+}
+
+.head {
+  position: sticky;
+  top: 50px;
   z-index: 3;
   display: flex;
   align-items: flex-end;
@@ -1260,25 +1312,3 @@ code {
   }
 }
 
-.viewswitch {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-}
-
-.viewswitch button {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  padding: 4px 8px;
-}
-
-.viewswitch button + button {
-  border-left: 1px solid var(--border);
-}
-
-.viewswitch button.active {
-  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.18));
-  color: var(--fg);
-}
