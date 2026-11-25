@@ -53,7 +53,7 @@ export class ArchitecturePanel {
     }
 
     const panel = ArchitecturePanel.current;
-    panel.title = `Derust — architecture — ${model.meta.crate}`;
+    panel.title = `Derust — project — ${model.meta.crate}`;
     panel.webview.html = render(context.extensionUri, panel.webview, model, narrative, flow, reading);
     panel.reveal(vscode.ViewColumn.Active, false);
   }
@@ -140,7 +140,10 @@ function render(
     'utf8'
   );
   const nonce = crypto.randomBytes(16).toString('base64');
-  const data = JSON.stringify(model).replace(/<\//g, '<\\/');
+  const data = JSON.stringify({
+    meta: model.meta,
+    identity: model.brief.overview.identity
+  }).replace(/<\//g, '<\\/');
   const narrativeJson = JSON.stringify(narrative ?? null).replace(/<\//g, '<\\/');
   const flowJson = JSON.stringify(flow ?? null).replace(/<\//g, '<\\/');
   const readingJson = JSON.stringify(reading ?? null).replace(/<\//g, '<\\/');
