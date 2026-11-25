@@ -303,8 +303,9 @@ window.addEventListener('message',(event)=>{
   const message = event.data;
   if(!message || typeof message !== 'object') return;
   if(message.type === 'flow' && message.flow){
-    flow = message.flow; flowError = null;
+    flow = message.flow; flowError = null; flowDrawing = false;
     renderFlow();
+    renderLede();
   } else if(message.type === 'flowError' && typeof message.message === 'string'){
     flowError = message.message; flowDrawing = false;
     renderFlow();
