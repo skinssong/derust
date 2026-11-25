@@ -51,6 +51,10 @@ export class ArchitecturePanel {
     panel.reveal(vscode.ViewColumn.Active, false);
   }
 
+  static postFlowDrawing(): void {
+    void ArchitecturePanel.current?.webview.postMessage({ type: 'flowDrawing' });
+  }
+
   static postFlow(flow: FlowSpec): void {
     void ArchitecturePanel.current?.webview.postMessage({ type: 'flow', flow });
   }

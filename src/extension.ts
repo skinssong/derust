@@ -56,6 +56,7 @@ let architectureService: ArchitectureService;
 let flowCache: FlowCache;
 let readingCache: ReadingCache;
 let architectureModel: ArchitectureModel | undefined;
+let flowRunning = false;
 let briefController: AbortController | undefined;
 let briefTarget: string | undefined;
 const overviewService = new OverviewService();
@@ -330,6 +331,9 @@ async function writeReading(): Promise<void> {
 }
 
 async function writeFlow(): Promise<void> {
+  if (flowRunning) {
+    return;
+  }
   const model = architectureModel;
   if (!model) {
     ArchitecturePanel.postFlowError('Run Derust: Analyze Architecture first.');
@@ -350,6 +354,7 @@ async function writeFlow(): Promise<void> {
     return;
   }
 
+  flowRunning = true;
   const settings: ProviderSettings = {
     baseUrl: config.baseUrl,
     model: config.model,
@@ -396,6 +401,15 @@ async function writeFlow(): Promise<void> {
     }
     const flow = parsed.spec;
     linkFlowSources(flow, model);
+    const generatedAt = new Date().toISOString();
+    const cacheKey = flowCache.key(model.meta.revision, config.model);
+    flowCache.write(model.meta.root, cacheKey, {
+      ...flow,
+      model: config.model,
+      revision: model.meta.revision,
+      generatedAt
+    });
+    ArchitecturePanel.postFlow(flow);
     const briefSettings: ProviderSettings = {
       ...settings,
       maxTokens: Math.min(config.maxOutputTokens, 1200)
@@ -439,21 +453,22 @@ async function writeFlow(): Promise<void> {
       }
       if (brief) {
         flow.brief = brief;
+        flowCache.write(model.meta.root, cacheKey, {
+          ...flow,
+          model: config.model,
+          revision: model.meta.revision,
+          generatedAt
+        });
+        ArchitecturePanel.postFlow(flow);
       }
     } catch (error) {
       output.appendLine(`[architecture] brief: ${messageOf(error)}`);
     }
-    const generatedAt = new Date().toISOString();
-    flowCache.write(model.meta.root, flowCache.key(model.meta.revision, config.model), {
-      ...flow,
-      model: config.model,
-      revision: model.meta.revision,
-      generatedAt
-    });
-    ArchitecturePanel.postFlow(flow);
   } catch (error) {
     output.appendLine(`[architecture] flow: ${messageOf(error)}`);
     ArchitecturePanel.postFlowError(messageOf(error));
+  } finally {
+    flowRunning = false;
   }
 }
 
@@ -523,6 +538,10 @@ async function analyzeArchitecture(): Promise<void> {
       cachedFlow,
       cachedReading
     );
+    if (!cachedFlow || !cachedFlow.brief) {
+      ArchitecturePanel.postFlowDrawing();
+      void writeFlow();
+    }
   } catch (error) {
     output.appendLine(`[architecture] ${messageOf(error)}`);
     void vscode.window.showErrorMessage(

@@ -33,6 +33,7 @@ let reading = READING;
 let readingError = null;
 let flow = FLOW;
 let flowError = null;
+let flowDrawing = false;
 const vscodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
 const stats = document.getElementById('stats');
@@ -52,7 +53,8 @@ function firstSentence(text){
 }
 const ledeText = document.getElementById('ledeText');
 function renderLede(){
-  const line = firstSentence((flow && flow.brief) || DATA.identity);
+  const brief = flow && flow.brief ? String(flow.brief).replace(/\s+/g, ' ').trim() : '';
+  const line = brief || firstSentence(DATA.identity);
   ledeText.textContent = line || 'No project summary is stored; draw the run to write one.';
 }
 
@@ -218,6 +220,14 @@ const flowDoc = document.getElementById('flowDoc');
 function renderFlow(){
   flowDoc.textContent='';
   if(!flow){
+    if(flowDrawing){
+      flowDoc.append(el('p','side-copy','Drawing the run: the stages, branches and loop that carry one use.'));
+      flowDoc.append(el('p','note','The opening line is written from these stages once the run is drawn.'));
+      const waiting=el('button','brief-item','drawing…');
+      waiting.disabled=true;
+      flowDoc.append(waiting);
+      return;
+    }
     flowDoc.append(el('p','side-copy','Draw the steps of one normal run: what comes in, how it is enriched, where it leaves the process via the provider, how the reply is parsed, and how the run ends. Each stage names the module that does its work.'));
     if(flowError) flowDoc.append(el('p','note',flowError));
     const button=el('button','brief-item','draw the run');
@@ -296,7 +306,7 @@ window.addEventListener('message',(event)=>{
     flow = message.flow; flowError = null;
     renderFlow();
   } else if(message.type === 'flowError' && typeof message.message === 'string'){
-    flowError = message.message;
+    flowError = message.message; flowDrawing = false;
     renderFlow();
   } else if(message.type === 'reading' && message.reading){
     reading = message.reading; readingError = null;
