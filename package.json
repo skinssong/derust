@@ -2,7 +2,7 @@
   "name": "derust",
   "displayName": "Derust",
   "description": "AI-generated, line-anchored readings of Rust: module operations, function walkthroughs, spotlights, and ownership.",
-  "version": "0.28.9",
+  "version": "0.28.10",
   "publisher": "rsong",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -83,6 +83,11 @@
         "icon": "$(output)"
       },
       {
+        "command": "derust.configureProvider",
+        "title": "Derust: Configure Provider",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "derust.importEnv",
         "title": "Derust: Import Provider Settings from .env",
         "icon": "$(key)"
@@ -147,6 +152,9 @@
         },
         {
           "command": "derust.showIndexPacket"
+        },
+        {
+          "command": "derust.configureProvider"
         },
         {
           "command": "derust.importEnv"

@@ -53,28 +53,24 @@ regenerated.
 From the Marketplace, search for **Derust**, or install the local VSIX:
 
 ```bash
-code --install-extension release/derust-0.9.0.vsix
+code --install-extension release/derust-0.28.10.vsix
 ```
 
 For development, open this folder in VS Code and press `F5`.
 
 ## Configure
 
-1. Put your provider settings in the workspace `.env`:
+The first AI request asks for what it needs, directly in VS Code:
 
-   ```dotenv
-   LLM_BASE_URL=https://your-provider.example/v1
-   LLM_MODEL=your-model
-   LLM_API_KEY=…
-   ```
+- **Base URL** and **model** are written to your user settings (`derust.baseUrl`,
+  `derust.model`). The base URL is OpenAI-compatible; Derust appends
+  `/chat/completions`, so do not include that path.
+- **API key** goes to VS Code SecretStorage, never to `settings.json`.
 
-   `LLM_BASE_URL` is an OpenAI-compatible base URL. Derust appends
-   `/chat/completions`; do not include that path in the base URL.
-
-2. Run **Derust: Import Provider Settings from .env**.
-
-The API key goes to VS Code SecretStorage. The base URL and model are written
-to settings.
+Run **Derust: Configure Provider** to change them later; leave the key empty
+there to keep the stored one. If you prefer a file, **Derust: Import Provider
+Settings from .env** still reads `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`
+from a `.env`.
 
 ### Settings
 
@@ -112,6 +108,7 @@ emitting JSON. If a request returns an empty message, raise
 | **Derust: Show File Overview** | Opens the Overview. It may start the reading when `derust.briefOnOverview` is on. |
 | **Derust: Rebuild Workspace Index** | Forces a fresh rust-analyzer index. |
 | **Derust: Show Index Packet** | Opens the index evidence for the current file. |
+| **Derust: Configure Provider** | Asks for the base URL, model and API key; settings go to VS Code settings, the key to SecretStorage. |
 | **Derust: Import Provider Settings from .env** | Reads provider settings and stores the key in SecretStorage. |
 | **Derust: Clear Analysis Cache** | Removes cached analyses and readings. |
 

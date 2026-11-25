@@ -54,6 +54,103 @@ export async function resolveApiKey(context: vscode.ExtensionContext): Promise<s
   return process.env.LLM_API_KEY?.trim() || undefined;
 }
 
+export type ProviderSetup = { config: ReaderConfig; apiKey: string };
+
+function validateBaseUrl(value: string): string | undefined {
+  const text = value.trim();
+  if (!text) {
+    return 'A base URL is required.';
+  }
+  try {
+    const url = new URL(text);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return 'The URL must start with http:// or https://.';
+    }
+  } catch {
+    return 'Enter a valid URL.';
+  }
+  return undefined;
+}
+
+/**
+ * Return a usable provider configuration, asking for what is missing. The base
+ * URL and model are written to the user's VS Code settings; the key goes to
+ * SecretStorage. With `force`, every field is asked again and an empty key
+ * keeps the stored one.
+ */
+export async function ensureProvider(
+  context: vscode.ExtensionContext,
+  options: { force?: boolean } = {}
+): Promise<ProviderSetup | undefined> {
+  let config = getConfig();
+  let apiKey = await resolveApiKey(context);
+  const askConnection = Boolean(options.force) || !config.baseUrl || !config.model;
+  const askKey = Boolean(options.force) || !apiKey;
+
+  if (!askConnection && !askKey) {
+    return { config, apiKey: apiKey! };
+  }
+
+  let baseUrl = config.baseUrl;
+  let model = config.model;
+  if (options.force || !baseUrl) {
+    const answer = await vscode.window.showInputBox({
+      title: 'Derust: provider base URL',
+      prompt: 'Base URL of an OpenAI-compatible endpoint, for example https://api.openai.com/v1',
+      value: baseUrl,
+      placeHolder: 'https://api.example.com/v1',
+      ignoreFocusOut: true,
+      validateInput: validateBaseUrl
+    });
+    if (answer === undefined) {
+      return undefined;
+    }
+    baseUrl = answer.trim();
+  }
+  if (options.force || !model) {
+    const answer = await vscode.window.showInputBox({
+      title: 'Derust: model',
+      prompt: 'Model id sent to the provider (stored in derust.model).',
+      value: model,
+      placeHolder: 'gpt-4.1-mini',
+      ignoreFocusOut: true,
+      validateInput: (value) => (value.trim() ? undefined : 'A model id is required.')
+    });
+    if (answer === undefined) {
+      return undefined;
+    }
+    model = answer.trim();
+  }
+  const settings = vscode.workspace.getConfiguration('derust');
+  await settings.update('baseUrl', baseUrl, vscode.ConfigurationTarget.Global);
+  await settings.update('model', model, vscode.ConfigurationTarget.Global);
+
+  if (askKey) {
+    const answer = await vscode.window.showInputBox({
+      title: 'Derust: API key',
+      prompt: apiKey
+        ? 'Stored in VS Code SecretStorage, never in settings.json. Leave empty to keep the current key.'
+        : 'Stored in VS Code SecretStorage, never in settings.json.',
+      password: true,
+      ignoreFocusOut: true
+    });
+    if (answer === undefined) {
+      return undefined;
+    }
+    if (answer.trim()) {
+      apiKey = answer.trim();
+    }
+  }
+  if (!apiKey) {
+    void vscode.window.showWarningMessage('Derust: an API key is required.');
+    return undefined;
+  }
+
+  await context.secrets.store(API_KEY_SECRET, apiKey);
+  config = { ...getConfig(), baseUrl, model };
+  return { config, apiKey };
+}
+
 export async function importProviderSettings(context: vscode.ExtensionContext): Promise<boolean> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const candidates = [

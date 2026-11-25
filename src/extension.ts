@@ -16,7 +16,7 @@ import {
 import { BriefCache } from './briefCache';
 import { AnalysisCache } from './cache';
 import { Analysis, CachedAnalysis, CachedBrief } from './contract';
-import { getConfig, importProviderSettings, messageOf, resolveApiKey } from './config';
+import { ensureProvider, getConfig, importProviderSettings, messageOf } from './config';
 import { FlowCache } from './flowCache';
 import { IndexService } from './indexService';
 import { ReadingCache } from './readingCache';
@@ -124,6 +124,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('derust.showOverview', (uri?: vscode.Uri) => showOverview(uri)),
     vscode.commands.registerCommand('derust.rebuildIndex', () => rebuildIndex()),
     vscode.commands.registerCommand('derust.showIndexPacket', () => showIndexPacket()),
+    vscode.commands.registerCommand('derust.configureProvider', async () => {
+      const provider = await ensureProvider(context, { force: true });
+      if (provider) {
+        void vscode.window.showInformationMessage(
+          `Derust: provider configured for ${provider.config.model}.`
+        );
+      }
+    }),
     vscode.commands.registerCommand('derust.importEnv', () => importProviderSettings(context)),
     vscode.commands.registerCommand('derust.clearCache', () => clearCache()),
     vscode.window.onDidChangeTextEditorSelection((event) => handleSelection(event)),
@@ -257,20 +265,12 @@ async function writeReading(): Promise<void> {
     ArchitecturePanel.postReadingError('Run Derust: Analyze Architecture first.');
     return;
   }
-  const config = getConfig();
-  if (!config.baseUrl || !config.model) {
-    ArchitecturePanel.postReadingError(
-      'Set derust.baseUrl and derust.model first, or import provider settings.'
-    );
+  const provider = await ensureProvider(contextRef);
+  if (!provider) {
+    ArchitecturePanel.postReadingError('Provider setup was cancelled.');
     return;
   }
-  const apiKey = await ensureApiKey();
-  if (!apiKey) {
-    ArchitecturePanel.postReadingError(
-      'No API key configured. Run Derust: Import Provider Settings from .env.'
-    );
-    return;
-  }
+  const { config, apiKey } = provider;
 
   const settings: ProviderSettings = {
     baseUrl: config.baseUrl,
@@ -339,20 +339,12 @@ async function writeFlow(): Promise<void> {
     ArchitecturePanel.postFlowError('Run Derust: Analyze Architecture first.');
     return;
   }
-  const config = getConfig();
-  if (!config.baseUrl || !config.model) {
-    ArchitecturePanel.postFlowError(
-      'Set derust.baseUrl and derust.model first, or import provider settings.'
-    );
+  const provider = await ensureProvider(contextRef);
+  if (!provider) {
+    ArchitecturePanel.postFlowError('Provider setup was cancelled.');
     return;
   }
-  const apiKey = await ensureApiKey();
-  if (!apiKey) {
-    ArchitecturePanel.postFlowError(
-      'No API key configured. Run Derust: Import Provider Settings from .env.'
-    );
-    return;
-  }
+  const { config, apiKey } = provider;
 
   flowRunning = true;
   const settings: ProviderSettings = {
@@ -853,7 +845,7 @@ async function explainFile(uri: vscode.Uri, force: boolean): Promise<void> {
     return;
   }
 
-  const config = getConfig();
+  let config = getConfig();
   const document = await vscode.workspace.openTextDocument(uri);
   const fileLabel = vscode.workspace.asRelativePath(uri, false);
   const source = document.getText();
@@ -889,7 +881,7 @@ async function explainFile(uri: vscode.Uri, force: boolean): Promise<void> {
     ? buildProfileCandidates(moduleContext, source)
     : undefined;
   const contextRevision = moduleContext?.revision ?? '';
-  const key = config.model
+  let key = config.model
     ? briefCache.key(fileLabel, sourceHash, config.model, contextRevision)
     : '';
 
@@ -945,16 +937,15 @@ async function explainFile(uri: vscode.Uri, force: boolean): Promise<void> {
   }
 
   try {
-    if (!config.baseUrl || !config.model) {
-      throw new Error(
-        'Set derust.baseUrl and derust.model first, or import them with Derust: Import Provider Settings from .env.'
-      );
+    const provider = await ensureProvider(contextRef);
+    if (!provider) {
+      throw new Error('Provider setup was cancelled.');
     }
-
-    const apiKey = await ensureApiKey();
-    if (!apiKey) {
-      throw new Error('No API key configured. Run Derust: Import Provider Settings from .env.');
+    config = provider.config;
+    if (!key && config.model) {
+      key = briefCache.key(fileLabel, sourceHash, config.model, contextRevision);
     }
+    const apiKey = provider.apiKey;
 
     const overview = await overviewService.build(document);
     if (panelUri?.toString() !== uri.toString()) {
@@ -1214,7 +1205,7 @@ async function analyzeMany(uris: vscode.Uri[]): Promise<void> {
 }
 
 async function analyzeUri(uri: vscode.Uri, options: AnalyzeOptions): Promise<boolean> {
-  const config = getConfig();
+  let config = getConfig();
   const document = await vscode.workspace.openTextDocument(uri);
 
   if (document.lineCount > config.maxFileLines) {
@@ -1226,7 +1217,7 @@ async function analyzeUri(uri: vscode.Uri, options: AnalyzeOptions): Promise<boo
   const text = document.getText();
   const fileLabel = vscode.workspace.asRelativePath(uri, false);
   const docs = config.includeDocs ? await readProjectDocs(uri) : '';
-  const key = cache.key(text, config.model, `${fileLabel}\0${docs}`);
+  let key = cache.key(text, config.model, `${fileLabel}\0${docs}`);
 
   let cached = options.force ? undefined : await cache.read(key);
   if (!cached && !options.force) {
@@ -1234,16 +1225,13 @@ async function analyzeUri(uri: vscode.Uri, options: AnalyzeOptions): Promise<boo
   }
 
   if (!cached) {
-    if (!config.baseUrl || !config.model) {
-      throw new Error(
-        'Set derust.baseUrl and derust.model first, or import them with Derust: Import Provider Settings from .env.'
-      );
+    const provider = await ensureProvider(contextRef);
+    if (!provider) {
+      throw new Error('Provider setup was cancelled.');
     }
-
-    const apiKey = await ensureApiKey();
-    if (!apiKey) {
-      throw new Error('No API key configured. Run Derust: Import Provider Settings from .env.');
-    }
+    config = provider.config;
+    key = cache.key(text, config.model, `${fileLabel}\0${docs}`);
+    const apiKey = provider.apiKey;
 
     const settings: ProviderSettings = {
       baseUrl: config.baseUrl,
@@ -1532,24 +1520,6 @@ async function revealRange(start: number, end: number): Promise<void> {
   applyValueColors();
 }
 
-async function ensureApiKey(): Promise<string | undefined> {
-  let apiKey = await resolveApiKey(contextRef);
-  if (apiKey) {
-    return apiKey;
-  }
-
-  const answer = await vscode.window.showInformationMessage(
-    'Derust needs a provider API key. Import it from a .env file?',
-    'Import settings'
-  );
-
-  if (answer === 'Import settings') {
-    await vscode.commands.executeCommand('derust.importEnv');
-    apiKey = await resolveApiKey(contextRef);
-  }
-
-  return apiKey;
-}
 
 async function readAndAnalyzeFile(uri: vscode.Uri, force: boolean): Promise<void> {
   if (!force && briefTarget === uri.toString() && briefController) {
