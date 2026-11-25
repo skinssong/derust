@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<title>Derust — architecture</title>
+<script nonce="__NONCE__">__CYTOSCAPE__</script>
+<style>
+:root{--ink:#1e2320;--paper:#f2f3ed;--paper2:#f8f6ee;--paper3:#ebe9dd;--line:#d1d2c5;--muted:#647064;--rust:#a8431f;--blue:#3f7f9f;--sage:#6c7d3d;--amber:#b4652f;--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--mono:"SF Mono","Cascadia Code",Menlo,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);font:14px/1.45 var(--serif)}body{overflow:hidden}.app{height:100vh;display:flex;flex-direction:column}.top{flex:0 0 58px;display:flex;align-items:center;gap:14px;padding:0 22px;background:#202520;color:var(--paper);border-bottom:3px solid var(--rust)}.brand{font-size:19px;font-style:italic}.brand b{font-style:normal;color:#f6e2d5}.badge{font:10px var(--mono);border:1px solid #71523f;color:#d9bfae;padding:3px 6px}.stats{margin-left:auto;font:10px var(--mono);color:#bcc5b9}.tabs{flex:0 0 34px;display:flex;gap:0;padding:0 16px;background:var(--paper2);border-bottom:1px solid var(--line)}.tabs button{font:10px var(--mono);text-transform:lowercase;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:8px 12px;cursor:pointer}.tabs button.active{color:var(--rust);border-bottom-color:var(--rust)}.tabs button:hover{color:var(--ink)}.docPane{flex:1;min-height:0;overflow:auto;background:var(--paper);padding:30px 7vw 60px}.docPane[hidden],.main[hidden]{display:none!important}.docPane article{max-width:860px;margin:0 auto}.docPane .side-title{font-size:26px;line-height:1.15;margin:0 0 4px}.docPane .side-path{margin-bottom:18px}.docPane .section h3{margin-top:0}.flowWrap{overflow:auto;border:1px solid var(--line);background:var(--paper2);padding:14px;margin:14px 0}.flowSvg{display:block;max-width:none}.flowActions{margin-top:14px}.flowStageRow{border-top:1px solid #e3e1d5;padding:8px 0}.flowStageRow .carrier-meta{margin-left:8px}.readingStep{display:flex;gap:14px;border-top:1px solid #e3e1d5;padding:14px 0}.readingStep .stepNo{font:11px var(--mono);color:var(--rust);min-width:22px;padding-top:2px}.readingStep .stepBody{flex:1;min-width:0}.readingStep .brief-doc{margin-top:3px}.readingFiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.readingFiles button{font:10px var(--mono);background:transparent;border:1px solid var(--line);color:var(--ink);padding:4px 7px;cursor:pointer}.readingFiles button:hover{border-color:var(--rust);color:var(--rust)}.filters{display:flex}.filters button{font:10px var(--mono);background:transparent;color:#bcc5b9;border:1px solid #4a554a;padding:4px 8px;cursor:pointer}.filters button+button{border-left:0}.filters button.active{background:#f1dfd3;border-color:#f1dfd3;color:#202520}.brief-purpose{font-size:13px;line-height:1.5;color:#3f4a40;margin:10px 0}.brief-purpose strong{font:10px var(--mono);font-weight:600;color:var(--muted);text-transform:lowercase}.brief-item{display:block;width:100%;text-align:left;border:0;border-top:1px solid #e3e1d5;background:transparent;padding:7px 0;cursor:pointer;color:var(--ink)}.brief-item:hover{background:var(--paper3)}.brief-name{font:11px var(--mono);font-weight:600}.brief-doc{display:block;font-size:12px;color:#505a50;margin-top:2px}.brief-meta{display:block;font:9px var(--mono);color:var(--muted);margin-top:3px}.carrier{display:flex;justify-content:space-between;gap:8px;border-top:1px solid #e3e1d5;padding:6px 0}.carrier-meta{font:9px var(--mono);color:var(--muted)}.note{font:10px var(--mono);color:var(--muted);margin:6px 0;line-height:1.5}.main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 380px}.graphwrap{min-width:0;min-height:0;display:flex;flex-direction:column}.graph{flex:1;min-width:0;min-height:0;position:relative;background:var(--paper)}#cy{position:absolute;inset:0}.legend{position:absolute;left:16px;bottom:15px;background:rgba(248,246,238,.95);border:1px solid var(--line);padding:8px 10px;font:10px var(--mono);color:var(--muted);line-height:1.7}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}.dot.module{background:var(--rust);border-radius:2px}.dot.type{background:var(--blue)}.dot.fn{background:var(--sage)}.side{min-height:0;overflow:auto;background:var(--paper2);border-left:1px solid var(--line);padding:16px}.side-title{font-size:20px;line-height:1.2;margin:0 0 4px;overflow-wrap:anywhere}.side-path{font:10px var(--mono);color:var(--muted);overflow-wrap:anywhere}.side-copy{color:#505a50;font-size:13px;margin:12px 0}.counts{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.chip{font:9px var(--mono);border:1px solid var(--line);padding:3px 6px;color:var(--muted)}.hint{font:10px var(--mono);color:var(--muted);margin:12px 0}.section{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.section h3{font:10px var(--mono);font-weight:600;color:var(--muted);margin:0 0 8px;text-transform:lowercase}.symbol{border-bottom:1px solid #e3e1d5;padding:7px 0}.symbol summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline}.symbol summary::-webkit-details-marker{display:none}.symbol summary::before{content:"▸";color:var(--rust);font:9px var(--mono)}.symbol[open] summary::before{content:"▾"}.symbol-name{font:11px var(--mono);font-weight:600;overflow-wrap:anywhere}.symbol-kind{font:9px var(--mono);color:var(--muted)}.symbol-count{margin-left:auto;font:9px var(--mono);color:var(--rust);white-space:nowrap}.occurrences{margin:7px 0 0 16px}.occurrence{display:block;width:100%;text-align:left;border:0;border-left:2px solid transparent;background:transparent;padding:5px 0 5px 7px;cursor:pointer;color:var(--ink)}.occurrence:hover{border-left-color:var(--rust);background:var(--paper3)}.occurrence-file{display:block;font:9px var(--mono);color:var(--muted)}.occurrence-kind{display:inline-block;font:9px var(--mono);color:var(--blue);margin-bottom:2px}.occurrence-code{display:block;font:10px var(--mono);white-space:pre-wrap;color:#3c443d;margin-top:2px}.occ-node{font:8px var(--mono);color:#1e2320;text-align:center;background:#f8f6ee;border:1px solid #a8431f;border-radius:2px;padding:3px 4px;width:132px}.occ-node.use{border-color:#3f7f9f}.occ-node.call{border-color:#a8431f;background:#f1dfd3}.back{display:none;position:absolute;top:14px;left:16px;z-index:2;font:10px var(--mono);background:var(--paper2);border:1px solid var(--line);color:var(--ink);padding:6px 9px;cursor:pointer}.back.show{display:block}.back:hover{border-color:var(--rust);color:var(--rust)}.drawer{display:none;flex:0 0 auto;height:34%;min-height:150px;overflow:auto;background:var(--paper2);border-top:2px solid var(--rust);padding:10px 14px}.drawer.open{display:block}.drawer-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}.drawer-head h2{font:12px var(--mono);margin:0;overflow-wrap:anywhere}.drawer-head button{margin-left:auto;border:0;background:transparent;color:var(--rust);cursor:pointer;font:10px var(--mono)}.source-group{border-top:1px solid var(--line);padding:8px 0}.source-loc{font:10px var(--mono);color:var(--muted);margin-bottom:4px}.source-loc.openable{cursor:pointer}.source-loc.openable:hover{color:var(--rust)}.source-line{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;font:10px/1.6 var(--mono);white-space:pre}.source-line .ln{text-align:right;color:#92998f;user-select:none}.source-line.target{background:#f1dfd3;border-left:2px solid var(--rust);padding-left:2px}.source-line.target .ln{color:var(--rust)}.empty{font-size:12px;color:var(--muted);font-style:italic}.caveat{font:10px var(--mono);color:var(--muted);line-height:1.55;border-left:2px solid var(--amber);background:#f5efe2;padding:8px;margin-top:14px}@media(max-width:850px){body{overflow:auto}.app{height:auto;min-height:100vh}.main{grid-template-columns:1fr}.graph{height:62vh;min-height:430px}.side{max-height:50vh;border-left:0;border-top:1px solid var(--line)}.stats{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="top"><div class="brand"><b>Derust</b> Architecture</div><span class="badge">workspace</span><div class="filters" id="filters"><button data-filter="calls" class="active">calls</button><button data-filter="uses">uses</button><button data-filter="all">all</button></div><div class="stats" id="stats"></div></header>
+<nav class="tabs" id="tabs"><button data-tab="map" class="active">map</button><button data-tab="overview">overview</button><button data-tab="flow">flow</button><button data-tab="reading">reading</button></nav>
+<div class="main" id="mapPane">
+  <div class="graphwrap">
+    <div class="graph"><button class="back" id="back">← all components</button><div id="cy"></div><div class="legend"><span class="dot module"></span>component &nbsp; <span style="color:var(--rust)">—</span> calls &nbsp; <span style="color:var(--blue)">···</span> uses &nbsp; <span style="color:var(--amber)">- -</span> implements/http<br>hover a component to trace its lines &nbsp;·&nbsp; node size = code lines (small / medium / large) &nbsp;·&nbsp; amber = data module &nbsp;·&nbsp; sage = mixed &nbsp;·&nbsp; click a component for its symbols and usages &nbsp;·&nbsp; double-click one to open its module with the Derust overview &nbsp;·&nbsp; click an edge to open the calls and uses it is made of</div></div>
+    <section class="drawer" id="drawer">
+      <div class="drawer-head"><h2 id="drawer-title"></h2><span class="side-path" id="drawer-sub"></span><button id="drawer-close">close</button></div>
+      <div id="drawer-body"></div>
+    </section>
+  </div>
+  <aside class="side" id="side"></aside>
+</div>
+<section class="docPane" id="overviewPane" hidden><article id="overviewDoc"></article></section>
+<section class="docPane" id="flowPane" hidden><article id="flowDoc"></article></section>
+<section class="docPane" id="readingPane" hidden><article id="readingDoc"></article></section>
+</div>
+<script nonce="__NONCE__">
+const DATA = __DATA__;
+const NARRATIVE = __NARRATIVE__;
+const FLOW = __FLOW__;
+const READING = __READING__;
+let reading = READING;
+let readingError = null;
+let flow = FLOW;
+let flowError = null;
+let narrative = NARRATIVE;
+let narrativeError = null;
+const vscodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
+const NODE_BOX = { small: { w: 96, h: 40 }, medium: { w: 152, h: 54 }, large: { w: 208, h: 70 } };
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: [
+    ...nodeElements(),
+    ...edgeElements()
+  ],
+  style: [
+    { selector: 'node', style: {
+      'shape': 'round-rectangle', 'width': 'data(w)', 'height': 'data(h)',
+      'background-color': '#f8f6ee', 'border-width': 1.5, 'border-color': '#202520',
+      'label': 'data(label)', 'color': '#1e2320', 'font-family': 'ui-monospace, Menlo, monospace', 'font-size': 12,
+      'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'wrap', 'text-max-width': 150
+    }},
+    { selector: 'node[role = "data"]', style: { 'background-color': '#fbf3e4', 'border-color': '#b4652f' } },
+    { selector: 'node[role = "mixed"]', style: { 'background-color': '#eff3ea', 'border-color': '#6c7d3d' } },
+    { selector: 'node[sizeClass = "large"]', style: { 'border-width': 2.2, 'font-size': 13 } },
+    { selector: 'node[sizeClass = "small"]', style: { 'border-width': 1.3, 'font-size': 11 } },
+    { selector: 'node[?external]', style: { 'border-style': 'dashed', 'border-color': '#9e9e9e', 'background-color': '#ffffff' } },
+    { selector: 'node:selected', style: { 'border-color': '#a8431f', 'border-width': 3, 'background-color': '#f1dfd3' } },
+    { selector: 'edge', style: {
+      'width': 1.2, 'line-color': '#a8431f', 'target-arrow-color': '#a8431f', 'target-arrow-shape': 'triangle',
+      'curve-style': 'round-segments', 'edge-distances': 'node-position', 'segment-weights': 'data(segW)', 'segment-distances': 'data(segD)', 'label': '', 'font-family': 'ui-monospace, Menlo, monospace', 'font-size': 8,
+      'color': '#596054', 'text-background-color': '#f2f3ed', 'text-background-opacity': 1, 'text-background-padding': 2,
+      'text-wrap': 'none', 'text-margin-y': -6
+    }},
+    { selector: 'edge[kind = "uses"]', style: { 'line-style': 'dashed', 'line-color': '#3f7f9f', 'target-arrow-color': '#3f7f9f' } },
+    { selector: 'edge[kind = "implements"]', style: { 'line-style': 'dashed', 'line-color': '#b4652f', 'target-arrow-color': '#b4652f' } },
+    { selector: 'edge[kind = "http"]', style: { 'line-style': 'dotted', 'line-color': '#8a8f87', 'target-arrow-color': '#8a8f87' } },
+    { selector: 'edge.showLabel', style: { 'label': 'data(label)' } },
+    { selector: 'edge.filtered', style: { 'display': 'none' } },
+    { selector: '.dim', style: { 'opacity': 0.18 } },
+    { selector: 'node.occ', style: { 'shape': 'round-rectangle', 'width': 172, 'height': 34, 'background-color': '#f8f6ee', 'border-width': 1, 'border-color': '#a8431f', 'label': 'data(label)', 'font-family': 'ui-monospace, Menlo, monospace', 'font-size': 8, 'line-height': 1.4, 'text-wrap': 'wrap', 'text-max-width': 164, 'text-valign': 'center', 'text-halign': 'center', 'color': '#1e2320' } },
+    { selector: 'node.occ.use', style: { 'border-color': '#3f7f9f', 'background-color': '#eef5f7' } },
+    { selector: 'edge.occEdge', style: { 'width': .7, 'line-style': 'dashed', 'line-color': '#b4652f', 'target-arrow-color': '#b4652f', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'label': '' } },
+    { selector: 'edge.noneEdge', style: { 'width': 1, 'line-style': 'dotted', 'line-color': '#9e9e9e', 'target-arrow-color': '#9e9e9e', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } }
+  ],
+  layout: { name: 'preset', fit: true, padding: 45 },
+  wheelSensitivity: 0.2,
+  userPanningEnabled: true,
+  userZoomingEnabled: true
+});
+cy.edges().forEach(e => { const k = Object.keys(e.data('kinds') || {}); e.data('kind', k.includes('calls') ? 'calls' : k.includes('uses') ? 'uses' : k.includes('implements') ? 'implements' : 'http'); });
+function updateEdgeLabels(){ const show = cy.zoom() >= 0.65; cy.edges().filter(e => e.data('kinds') !== undefined).toggleClass('showLabel', show); }
+cy.on('zoom', updateEdgeLabels);
+cy.on('layoutstop', updateEdgeLabels);
+updateEdgeLabels();
+let edgeFilter = 'calls';
+function applyFilter(){
+  cy.edges().forEach(edge => {
+    const kinds = edge.data('kinds');
+    if (kinds === undefined) return;
+    const calls = kinds.calls || 0;
+    const uses = kinds.uses || 0;
+    const keep = edgeFilter === 'all' ? true : edgeFilter === 'calls' ? calls > 0 : uses > 0;
+    edge.toggleClass('filtered', !keep);
+    if (!keep) return;
+    if (edgeFilter === 'calls') {
+      edge.data('kind', 'calls');
+      edge.data('label', `calls ×${calls}`);
+    } else if (edgeFilter === 'uses') {
+      edge.data('kind', 'uses');
+      edge.data('label', `uses ×${uses}`);
+    } else {
+      edge.data('kind', calls > 0 ? 'calls' : 'uses');
+      edge.data('label', edge.data('fullLabel'));
+    }
+  });
+  updateEdgeLabels();
+}
+function activeOccurrences(data){
+  const all = data.occurrences || [];
+  if (edgeFilter === 'calls') return all.filter(o => o.kind === 'call');
+  if (edgeFilter === 'uses') return all.filter(o => o.kind !== 'call');
+  return all;
+}
+document.getElementById('filters').addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-filter]');
+  if (!button) return;
+  edgeFilter = button.dataset.filter;
+  for (const item of document.querySelectorAll('#filters button')) item.classList.toggle('active', item === button);
+  applyFilter();
+});
+applyFilter();
+function ensureVisible(){
+  if (!(cy.zoom() > 0.01)) {
+    cy.resize();
+    cy.fit(cy.elements(), 45);
+    updateEdgeLabels();
+  }
+}
+window.addEventListener('resize', ensureVisible);
+requestAnimationFrame(ensureVisible);
+cy.style().update();
+
+const side = document.getElementById('side');
+const stats = document.getElementById('stats');
+stats.textContent = `${DATA.meta.crate ? DATA.meta.crate + ' · ' : ''}${DATA.meta.components} components · ${DATA.meta.indexedReferences} indexed references · ${DATA.meta.edges} links · rev ${String(DATA.meta.revision).slice(0, 16)}`;
+
+function el(tag, cls, text) { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; }
+function renderNode(node) {
+  side.textContent='';
+  side.append(el('div','side-title',node.id));
+  side.append(el('div','side-path',node.modules.join('  ·  ') || (node.external ? 'external boundary' : 'no modules')));
+  side.append(el('p','side-copy', node.external ? 'External boundary inferred from the client transport code.' : node.role === 'data' ? 'Data module: its functions never take a type from another module. Node size follows code lines.' : 'Click a symbol to see actual code usages in this component.'));
+  const usages = node.symbols.reduce((n,s)=>n+s.occurrences.length,0);
+  const chips=el('div','counts');
+  chips.append(el('span','chip',`${node.symbols.length} symbols`),el('span','chip',`${usages} usages`));
+  chips.append(el('span','chip',`${node.role || 'module'}`),el('span','chip',`${node.codeLines || 0} code lines`),el('span','chip',`${node.dependencies || 0} foreign symbols`));
+  side.append(chips);
+  if(!node.symbols.length){side.append(el('p','empty','No indexed symbols in this component.')); return;}
+  const section=el('section','section'); section.append(el('h3',null,'symbols and usages'));
+  for(const symbol of node.symbols.sort((a,b)=>b.occurrences.length-a.occurrences.length)){
+    const d=el('details','symbol');
+    const summary=el('summary');
+    summary.append(el('span','symbol-name',symbol.name),el('span','symbol-kind',symbol.kind),el('span','symbol-count',symbol.occurrences.length ? `${symbol.occurrences.length} usages` : 'no indexed usage'));
+    d.append(summary);
+    if(symbol.occurrences.length){
+      const list=el('div','occurrences');
+      for(const occ of symbol.occurrences){
+        const b=el('button','occurrence');
+        b.append(el('span','occurrence-kind',occ.kind),el('span','occurrence-file',`${occ.file}:${occ.line}`),el('span','occurrence-code',occ.snippet.find(s=>s.line===occ.line)?.text.trim()||''));
+        b.addEventListener('click',()=>showLines(symbol.name,`${occ.kind} · ${node.id}`,[occ])); list.append(b);
+      }
+      d.append(list);
+    }
+    section.append(d);
+  }
+  side.append(section);
+  side.append(el('div','caveat','Spike evidence: indexed references only. Imports are excluded from usage rows. Trait/private/macro edges may be missing.'));
+}
+const drawer=document.getElementById('drawer');
+const drawerTitle=document.getElementById('drawer-title');
+const drawerSub=document.getElementById('drawer-sub');
+const drawerBody=document.getElementById('drawer-body');
+function closeDrawer(){
+  if(!drawer.classList.contains('open')) return;
+  drawer.classList.remove('open');
+  cy.resize();
+  cy.fit(cy.elements(), 50);
+}
+document.getElementById('drawer-close').addEventListener('click',closeDrawer);
+function showLines(title,subtitle,occurrences){
+  drawerTitle.textContent=title;
+  drawerSub.textContent=subtitle||'';
+  drawerBody.textContent='';
+  for(const occ of occurrences){
+    const group=el('div','source-group');
+    const loc = el('div','source-loc openable',`${occ.file}:${occ.line}  ·  ${occ.kind}`);
+    loc.title = 'Open in editor';
+    loc.addEventListener('click', () => { if (vscodeApi) vscodeApi.postMessage({ type: 'reveal', file: occ.file, line: occ.line, root: DATA.meta.root }); });
+    group.append(loc);
+    for(const line of occ.snippet){
+      const row=el('div','source-line'+(line.line===occ.line?' target':''));
+      row.append(el('span','ln',String(line.line)),el('span',null,line.text));
+      group.append(row);
+    }
+    drawerBody.append(group);
+  }
+  drawer.classList.add('open');
+  cy.resize();
+  cy.fit(cy.elements(), 60);
+}
+let mode = 'overview';
+const back = document.getElementById('back');
+function nodeData(n){
+  const box = NODE_BOX[n.sizeClass] || NODE_BOX.medium;
+  return { id: n.id, label: n.id, external: n.external, role: n.role || 'behavior', sizeClass: n.sizeClass || 'medium', codeLines: n.codeLines || 0, dependencies: n.dependencies || 0, modules: n.modules || [], w: n.w || box.w, h: n.h || box.h };
+}
+function nodeElements(){
+  return DATA.nodes.map(n => ({ data: nodeData(n), position: { x: DATA.positions[n.id][0], y: DATA.positions[n.id][1] } }));
+}
+function edgeElements(){
+  return DATA.edges.map(e => ({ data: {
+    id: `${e.source}->${e.target}`,
+    source: e.source, target: e.target, label: e.label, fullLabel: e.label, kinds: e.kinds,
+    segW: e.segW || [], segD: e.segD || [], occurrences: e.occurrences || []
+  } }));
+}
+function tagEdges(){
+  cy.edges().forEach(e => { const k = Object.keys(e.data('kinds') || {}); e.data('kind', k.includes('calls') ? 'calls' : k.includes('uses') ? 'uses' : k.includes('implements') ? 'implements' : 'http'); });
+}
+function postOpen(file){
+  if (vscodeApi && file) vscodeApi.postMessage({ type: 'openModule', file });
+}
+function briefItem(item, title, meta){
+  const button=el('button','brief-item');
+  button.append(el('span','brief-name',title));
+  if(item.description) button.append(el('span','brief-doc',item.description));
+  button.append(el('span','brief-meta',meta));
+  button.title = 'Open ' + item.file;
+  button.addEventListener('click',()=>postOpen(item.file));
+  return button;
+}
+function renderNarrativeSection(){
+  const section=el('section','section');
+  section.append(el('h3',null,'deeper dive'));
+  if(narrative && narrative.text){
+    for(const paragraph of String(narrative.text).split(/\n{2,}/)){
+      if(paragraph.trim()) section.append(el('p','brief-purpose',paragraph.trim()));
+    }
+    if(narrative.generatedAt){
+      section.append(el('p','note','generated from the source excerpts and facts · '+new Date(narrative.generatedAt).toLocaleString()));
+    }
+    return section;
+  }
+  const button=el('button','brief-item','analyze the code');
+  button.addEventListener('click',()=>{
+    if(!vscodeApi) return;
+    vscodeApi.postMessage({type:'writeNarrative'});
+    button.textContent='writing…';
+    button.disabled=true;
+  });
+  section.append(el('p','note','Reads the source excerpts supplied with this brief (comments blanked) and writes this section in depth.'),button);
+  if(narrativeError) section.append(el('p','note',narrativeError));
+  return section;
+}
+let activeTab = 'map';
+const mapPane = document.getElementById('mapPane');
+const overviewPane = document.getElementById('overviewPane');
+const overviewDoc = document.getElementById('overviewDoc');
+const flowPane = document.getElementById('flowPane');
+const flowDoc = document.getElementById('flowDoc');
+const readingPane = document.getElementById('readingPane');
+const readingDoc = document.getElementById('readingDoc');
+const tabs = document.getElementById('tabs');
+function setTab(name){
+  activeTab = name;
+  mapPane.hidden = name !== 'map';
+  overviewPane.hidden = name !== 'overview';
+  flowPane.hidden = name !== 'flow';
+  readingPane.hidden = name !== 'reading';
+  document.getElementById('filters').style.display = name === 'map' ? '' : 'none';
+  for(const button of tabs.querySelectorAll('button')){
+    button.classList.toggle('active', button.dataset.tab === name);
+  }
+  if(name === 'overview') renderOverview();
+  if(name === 'flow') renderFlow();
+  if(name === 'reading') renderReading();
+}
+tabs.addEventListener('click',(event)=>{
+  const button = event.target.closest('button[data-tab]');
+  if(button) setTab(button.dataset.tab);
+});
+function renderOverview(){
+  const brief = DATA.brief;
+  overviewDoc.textContent='';
+  overviewDoc.append(el('div','side-title', DATA.meta.crate || 'project'));
+  overviewDoc.append(el('div','side-path','architecture brief · derived from the code'));
+  if(!brief){
+    overviewDoc.append(el('p','side-copy','No brief is stored in this model; run Analyze Architecture again.'));
+    return;
+  }
+  const overview = brief.overview || {};
+  const identity = overview.identity || overview.what;
+  if(identity){
+    const paragraph=el('p','brief-purpose');
+    paragraph.append(el('strong',null,'what it is: '),document.createTextNode(identity));
+    overviewDoc.append(paragraph);
+  }
+  if(overview.evidence && overview.evidence.length){
+    overviewDoc.append(el('p','note','inferred from: '+overview.evidence.join(', ')));
+  }
+  overviewDoc.append(renderNarrativeSection());
+}
+function wrapFlowTitle(title){
+  const words = String(title).split(/\s+/);
+  const lines = [];
+  let current = '';
+  for(const word of words){
+    if((current + ' ' + word).trim().length > 24 && current){ lines.push(current); current = word; }
+    else current = (current + ' ' + word).trim();
+    if(lines.length === 2) break;
+  }
+  if(current && lines.length < 2) lines.push(current);
+  return lines.length ? lines : [String(title)];
+}
+function buildFlowSvg(spec){
+  const NS='http://www.w3.org/2000/svg';
+  const stages = spec.stages || [];
+  const edges = spec.edges || [];
+  const ids = stages.map(s=>s.id);
+  const succ = new Map(ids.map(id=>[id,[]]));
+  const pred = new Map(ids.map(id=>[id,[]]));
+  for(const edge of edges){
+    if(!succ.has(edge.from) || !succ.has(edge.to)) continue;
+    succ.get(edge.from).push(edge.to);
+    pred.get(edge.to).push(edge.from);
+  }
+  const visited = new Set(); const onPath = new Set(); const back = new Set();
+  const dfs = (id)=>{
+    visited.add(id); onPath.add(id);
+    for(const next of succ.get(id) || []){
+      const key = id + '->' + next;
+      if(onPath.has(next)){ back.add(key); continue; }
+      if(!visited.has(next)) dfs(next);
+    }
+    onPath.delete(id);
+  };
+  for(const id of ids){ if(!visited.has(id)) dfs(id); }
+  const indeg = new Map(ids.map(id=>[id,0]));
+  for(const edge of edges){
+    if(back.has(edge.from + '->' + edge.to) || !indeg.has(edge.to)) continue;
+    indeg.set(edge.to, indeg.get(edge.to) + 1);
+  }
+  const rank = new Map(ids.map(id=>[id,0]));
+  const queue = ids.filter(id=>indeg.get(id) === 0);
+  while(queue.length){
+    const current = queue.shift();
+    for(const next of succ.get(current) || []){
+      if(back.has(current + '->' + next)) continue;
+      rank.set(next, Math.max(rank.get(next), rank.get(current) + 1));
+      indeg.set(next, indeg.get(next) - 1);
+      if(indeg.get(next) === 0) queue.push(next);
+    }
+  }
+  const columns = new Map();
+  for(const id of ids){
+    const r = rank.get(id);
+    if(!columns.has(r)) columns.set(r, []);
+    columns.get(r).push(id);
+  }
+  const W = 200, H = 58, STEP_X = 240, STEP_Y = 104;
+  const pos = new Map();
+  for(const [r, list] of columns){
+    list.forEach((id, i)=>{
+      pos.set(id, { x: 40 + i * STEP_X, y: 30 + r * STEP_Y });
+    });
+  }
+  const maxRank = Math.max(...columns.keys());
+  const maxRows = Math.max(...Array.from(columns.values()).map(list=>list.length));
+  const width = 40 + (maxRows - 1) * STEP_X + W + 40;
+  const height = 30 + maxRank * STEP_Y + H + 40;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
+  svg.setAttribute('class', 'flowSvg');
+  const defs = document.createElementNS(NS, 'defs');
+  defs.innerHTML = '<marker id="flowArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a8431f"/></marker>';
+  svg.append(defs);
+  for(const edge of edges){
+    const a = pos.get(edge.from), b = pos.get(edge.to);
+    if(!a || !b) continue;
+    const ax = a.x + W/2, ay = a.y + H, bx = b.x + W/2, by = b.y;
+    let d, lx, ly;
+    if(b.y > a.y){
+      const mid = (ay + by) / 2;
+      d = 'M ' + ax + ' ' + ay + ' L ' + ax + ' ' + mid + ' L ' + bx + ' ' + mid + ' L ' + bx + ' ' + by;
+      lx = (ax + bx) / 2; ly = mid - 6;
+    } else {
+      const x = Math.max(a.x, b.x) + W + 26;
+      const aMid = a.y + H/2, bMid = b.y + H/2;
+      d = 'M ' + (a.x + W) + ' ' + aMid + ' L ' + x + ' ' + aMid + ' L ' + x + ' ' + bMid + ' L ' + (b.x + W) + ' ' + bMid;
+      lx = x + 6; ly = (aMid + bMid) / 2;
+    }
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', b.y > a.y ? '#a8431f' : '#b4652f');
+    if(b.y <= a.y) path.setAttribute('stroke-dasharray', '4 3');
+    path.setAttribute('stroke-width', '1.2');
+    path.setAttribute('marker-end', 'url(#flowArrow)');
+    svg.append(path);
+    if(edge.label){
+      const text = document.createElementNS(NS, 'text');
+      text.setAttribute('x', lx); text.setAttribute('y', ly);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
+      text.setAttribute('font-size', '9');
+      text.setAttribute('fill', '#596054');
+      text.textContent = edge.label;
+      svg.append(text);
+    }
+  }
+  for(const stage of stages){
+    const p = pos.get(stage.id);
+    if(!p) continue;
+    const group = document.createElementNS(NS, 'g');
+    const rect = document.createElementNS(NS, 'rect');
+    rect.setAttribute('x', p.x); rect.setAttribute('y', p.y);
+    rect.setAttribute('width', W); rect.setAttribute('height', H);
+    rect.setAttribute('rx', stage.kind === 'decision' ? '12' : '4');
+    const fill = stage.kind === 'input' || stage.kind === 'output' ? '#f8f6ee' : stage.kind === 'decision' ? '#fbf3e4' : stage.kind === 'halt' ? '#f2f2ec' : '#ffffff';
+    const stroke = stage.kind === 'decision' ? '#b4652f' : stage.kind === 'halt' ? '#9e9e9e' : stage.kind === 'input' || stage.kind === 'output' ? '#a8431f' : '#202520';
+    rect.setAttribute('fill', fill); rect.setAttribute('stroke', stroke);
+    rect.setAttribute('stroke-width', stage.kind === 'halt' ? '1' : '1.4');
+    if(stage.kind === 'halt') rect.setAttribute('stroke-dasharray', '4 3');
+    group.append(rect);
+    const lines = wrapFlowTitle(stage.title);
+    lines.forEach((line, index)=>{
+      const text = document.createElementNS(NS, 'text');
+      text.setAttribute('x', p.x + W/2);
+      text.setAttribute('y', p.y + H/2 - (lines.length - 1) * 7 + index * 14 + 4);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
+      text.setAttribute('font-size', '11');
+      text.setAttribute('fill', '#1e2320');
+      text.textContent = line;
+      group.append(text);
+    });
+    const kindText = document.createElementNS(NS, 'text');
+    kindText.setAttribute('x', p.x + W/2);
+    kindText.setAttribute('y', p.y + H - 8);
+    kindText.setAttribute('text-anchor', 'middle');
+    kindText.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
+    kindText.setAttribute('font-size', '8');
+    kindText.setAttribute('fill', stage.source ? '#4c544a' : '#92998f');
+    const label = stage.source || stage.kind;
+    kindText.textContent = label.length > 34 ? '…' + label.slice(-33) : label;
+    group.append(kindText);
+    const title = document.createElementNS(NS, 'title');
+    const titleParts = [stage.title];
+    if(stage.source) titleParts.push('handled by ' + stage.source);
+    if(stage.detail) titleParts.push(stage.detail);
+    title.textContent = titleParts.join(' — ');
+    group.append(title);
+    if(stage.source && stage.file){
+      group.style.cursor = 'pointer';
+      group.addEventListener('click', () => {
+        if(vscodeApi) vscodeApi.postMessage({ type: 'reveal', root: DATA.meta.root, file: stage.file, line: stage.line || 1 });
+      });
+    }
+    svg.append(group);
+  }
+  return svg;
+}
+function renderFlow(){
+  flowDoc.textContent='';
+  flowDoc.append(el('div','side-title', DATA.meta.crate || 'project'));
+  flowDoc.append(el('div','side-path','execution flow · one normal run'));
+  if(!flow){
+    flowDoc.append(el('p','side-copy','Draw the steps of one normal run: what comes in, how it is enriched, where it leaves the process via the provider, how the reply is parsed, and how the run ends. Each stage names the module that does its work.'));
+    if(flowError) flowDoc.append(el('p','note',flowError));
+    const button=el('button','brief-item','draw the run');
+    button.addEventListener('click',()=>{
+      if(!vscodeApi) return;
+      vscodeApi.postMessage({type:'writeFlow'});
+      button.textContent='drawing…';
+      button.disabled=true;
+    });
+    flowDoc.append(button);
+    return;
+  }
+  flowDoc.append(el('p','note','Drawn from the code. The label under each stage is the module that does the work; click a stage to open it. ' + (flow.generatedAt ? 'Generated ' + new Date(flow.generatedAt).toLocaleString() + '.' : '')));
+  const wrap=el('div','flowWrap'); wrap.append(buildFlowSvg(flow)); flowDoc.append(wrap);
+  const list=el('section','section'); list.append(el('h3',null,'stages'));
+  for(const stage of flow.stages){
+    const row=el('div','flowStageRow');
+    row.append(el('span','brief-name',stage.title));
+    const where=el('span','carrier-meta',stage.source || stage.kind);
+    if(stage.source && stage.file){
+      where.style.cursor='pointer';
+      where.title='Open in editor';
+      where.addEventListener('click',()=>{ if(vscodeApi) vscodeApi.postMessage({ type: 'reveal', root: DATA.meta.root, file: stage.file, line: stage.line || 1 }); });
+    }
+    row.append(where);
+    if(stage.detail) row.append(el('p','note',stage.detail));
+    list.append(row);
+  }
+  flowDoc.append(list);
+  const actions=el('div','flowActions');
+  const redraw=el('button','brief-item','redraw');
+  redraw.addEventListener('click',()=>{
+    if(!vscodeApi) return;
+    vscodeApi.postMessage({type:'writeFlow'});
+    redraw.textContent='drawing…';
+    redraw.disabled=true;
+  });
+  actions.append(redraw); flowDoc.append(actions);
+  if(flowError) flowDoc.append(el('p','note',flowError));
+}
+function renderReading(){
+  readingDoc.textContent='';
+  readingDoc.append(el('div','side-title', DATA.meta.crate || 'project'));
+  readingDoc.append(el('div','side-path','reading path · how to peer through the code'));
+  if(!reading){
+    readingDoc.append(el('p','side-copy','Plan an order for reading one normal run: entry and dispatch, the loop, one provider exchange, tool dispatch, recording, then replay and resume. Only the order, with the files each step needs.'));
+    if(readingError) readingDoc.append(el('p','note',readingError));
+    const button=el('button','brief-item','suggest a reading order');
+    button.addEventListener('click',()=>{
+      if(!vscodeApi) return;
+      vscodeApi.postMessage({type:'writeReading'});
+      button.textContent='planning…';
+      button.disabled=true;
+    });
+    readingDoc.append(button);
+    return;
+  }
+  readingDoc.append(el('p','note','A suggested order, not a catalog. Each file opens in the editor; double-click a component in the map for its per-module reading.'));
+  reading.steps.forEach((step, index)=>{
+    const row=el('div','readingStep');
+    const no=el('div','stepNo',String(index+1).padStart(2,'0'));
+    const body=el('div','stepBody');
+    body.append(el('div','brief-name',step.title));
+    if(step.why) body.append(el('div','brief-doc',step.why));
+    const files=el('div','readingFiles');
+    for(const file of step.files){
+      const button=el('button',null,file);
+      button.title='Open ' + file;
+      button.addEventListener('click',()=>postOpen(file));
+      files.append(button);
+    }
+    body.append(files);
+    row.append(no, body);
+    readingDoc.append(row);
+  });
+  const actions=el('div','flowActions');
+  const redraw=el('button','brief-item','replan');
+  redraw.addEventListener('click',()=>{
+    if(!vscodeApi) return;
+    vscodeApi.postMessage({type:'writeReading'});
+    redraw.textContent='planning…';
+    redraw.disabled=true;
+  });
+  actions.append(redraw); readingDoc.append(actions);
+  if(readingError) readingDoc.append(el('p','note',readingError));
+}
+function resetSide(){
+  side.textContent='';
+  side.append(el('p','empty','Select a component for its symbols and usages, or a relationship to open the calls and uses it is made of.'));
+}
+
+function showOverview(){
+  mode='overview'; back.classList.remove('show'); closeDrawer();
+  cy.elements().remove();
+  cy.add([...nodeElements(), ...edgeElements()]);
+  tagEdges(); cy.style().update();
+  cy.layout({ name:'preset', fit:true, padding:45 }).run();
+  updateEdgeLabels();
+  applyFilter();
+  resetSide();
+}
+back.addEventListener('click', showOverview);
+
+function openEdge(data){
+  mode='edge'; back.classList.add('show'); closeDrawer();
+  cy.elements().remove();
+  cy.style().update();
+  const src = DATA.nodes.find(n=>n.id===data.source) || { id: data.source };
+  const dst = DATA.nodes.find(n=>n.id===data.target) || { id: data.target };
+  const occs = activeOccurrences(data);
+  // One middle node per call or per symbol, not per source line.
+  const groups = [];
+  const byKey = new Map();
+  for(const o of occs){
+    const key = (o.kind==='call' ? 'call:' : 'use:') + (o.label || o.kind);
+    let group = byKey.get(key);
+    if(!group){
+      group = { kind: o.kind==='call' ? 'call' : 'use', rawKind: o.kind, label: o.label || o.kind, list: [] };
+      byKey.set(key, group); groups.push(group);
+    }
+    group.list.push(o);
+  }
+  const gap = groups.length > 1 ? Math.min(64, 640/(groups.length-1)) : 64;
+  const xSrc = 0, xOcc = 360, xDst = 720;
+  const els = [
+    { group:'nodes', data:nodeData(src), position:{ x:xSrc, y:0 } },
+    { group:'nodes', data:nodeData(dst), position:{ x:xDst, y:0 } }
+  ];
+  if(!groups.length){
+    els.push({ group:'edges', data:{ id:'none', source:src.id, target:dst.id, label:'no indexed occurrence' }, classes:'noneEdge' });
+  }
+  groups.forEach((g,i)=>{
+    const id = `edgeNode:${i}`;
+    const label = g.list.length > 1 ? `${g.label} ×${g.list.length}` : g.label;
+    els.push({ group:'nodes', data:{ id, label, kind:g.kind, group:g }, position:{ x:xOcc, y:(i-(groups.length-1)/2)*gap }, classes:`occ ${g.kind}` });
+    els.push({ group:'edges', data:{ id:`${id}:in`, source:src.id, target:id }, classes:'occEdge' });
+    els.push({ group:'edges', data:{ id:`${id}:out`, source:id, target:dst.id }, classes:'occEdge' });
+  });
+  cy.add(els);
+  cy.layout({ name:'preset', fit:true, padding:70 }).run();
+  updateEdgeLabels();
+  renderEdge(data);
+}
+function renderEdge(data){
+  side.textContent='';
+  side.append(el('div','side-title',`${data.source} → ${data.target}`));
+  side.append(el('div','side-path',data.label || 'relationship'));
+  side.append(el('p','side-copy','Each middle node is one call or one symbol the left component uses. Click a node to read every line behind it in the panel below the graph.'));
+  const occs=activeOccurrences(data);
+  if(!occs.length){side.append(el('p','empty','No indexed call or usage occurrences for this edge.'));return;}
+  const counts={};
+  for(const o of occs) counts[o.kind]=(counts[o.kind]||0)+1;
+  const chips=el('div','counts');
+  for(const [kind,n] of Object.entries(counts)) chips.append(el('span','chip',`${kind} ×${n}`));
+  side.append(chips);
+  const groups={};
+  for(const o of occs) (groups[o.kind]=groups[o.kind]||[]).push(o);
+  for(const [kind,list] of Object.entries(groups)){
+    const sec=el('section','section'); sec.append(el('h3',null,kind));
+    for(const o of list){
+      const b=el('button','occurrence');
+      b.append(el('span','occurrence-file',`${o.file}:${o.line}`),el('span','occurrence-code',o.label || ''));
+      b.addEventListener('click',()=>showLines(o.label||o.kind,`${o.kind} · ${data.source} → ${data.target}`,[o])); sec.append(b);
+    }
+    side.append(sec);
+  }
+  side.append(el('div','caveat','These are the occurrences available in the current index. Imports are excluded. Trait dispatch and private calls may be missing from the count above.'));
+}
+function highlightNode(node){
+  cy.elements().addClass('dim');
+  node.removeClass('dim');
+  node.connectedEdges().removeClass('dim');
+  node.connectedEdges().connectedNodes().removeClass('dim');
+}
+function highlightEdge(edge){
+  cy.elements().addClass('dim');
+  edge.removeClass('dim');
+  edge.connectedNodes().removeClass('dim');
+}
+function restoreFocus(){
+  const selected = cy.nodes(':selected');
+  if (selected.length) { highlightNode(selected[0]); return; }
+  cy.elements().removeClass('dim');
+}
+let hovering = false;
+cy.on('mouseover','node',evt=>{ if(mode!=='overview') return; hovering = true; highlightNode(evt.target); });
+cy.on('mouseover','edge',evt=>{ if(mode!=='overview') return; hovering = true; highlightEdge(evt.target); });
+cy.on('mouseout','node, edge',()=>{ if(!hovering) return; hovering = false; restoreFocus(); });
+cy.on('dbltap','node',evt=>{
+  if (mode !== 'overview') return;
+  const files = evt.target.data('modules') || [];
+  if (!files.length || !vscodeApi) return;
+  const preferred = files.find(file => /(^|\/)mod\.rs$/.test(file)) || files[0];
+  vscodeApi.postMessage({ type: 'openModule', file: preferred });
+});
+cy.on('tap','edge',evt=>{ openEdge(evt.target.data()); });
+cy.on('tap','node',evt=>{
+  const node=evt.target;
+  if(mode==='edge'){
+    const group=node.data('group');
+    if(group){
+      const n=group.list.length;
+      showLines(group.label, `${n} ${group.rawKind}${n===1?'':'s'} · ${group.list[0].file}`, group.list);
+      return;
+    }
+    const found=DATA.nodes.find(n=>n.id===node.id()); if(found) renderNode(found);
+    closeDrawer();
+    return;
+  }
+  const found=DATA.nodes.find(n=>n.id===node.id());
+  if(!found) return;
+  closeDrawer();
+  cy.nodes().unselect(); node.select();
+  cy.elements().addClass('dim'); node.removeClass('dim'); node.connectedEdges().removeClass('dim'); node.connectedEdges().connectedNodes().removeClass('dim');
+  renderNode(found);
+});
+cy.on('tap',evt=>{
+  if(evt.target!==cy) return;
+  if(mode==='edge'){ showOverview(); return; }
+  closeDrawer();
+  cy.elements().removeClass('dim'); cy.nodes().unselect(); resetSide();
+});
+window.addEventListener('message',(event)=>{
+  const message = event.data;
+  if(!message || typeof message !== 'object') return;
+  if(message.type === 'narrative' && typeof message.text === 'string'){
+    narrative = { text: message.text, generatedAt: message.generatedAt };
+    narrativeError = null;
+    if(activeTab === 'overview') renderOverview();
+  } else if(message.type === 'narrativeError' && typeof message.message === 'string'){
+    narrativeError = message.message;
+    if(activeTab === 'overview') renderOverview();
+  } else if(message.type === 'flow' && message.flow){
+    flow = message.flow; flowError = null;
+    if(activeTab === 'flow') renderFlow();
+  } else if(message.type === 'flowError' && typeof message.message === 'string'){
+    flowError = message.message;
+    if(activeTab === 'flow') renderFlow();
+  } else if(message.type === 'reading' && message.reading){
+    reading = message.reading; readingError = null;
+    if(activeTab === 'reading') renderReading();
+  } else if(message.type === 'readingError' && typeof message.message === 'string'){
+    readingError = message.message;
+    if(activeTab === 'reading') renderReading();
+  }
+});
+
+setTab('map');
+resetSide();
+</script>
+</body>
+</html>

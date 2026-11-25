@@ -2,7 +2,7 @@
   "name": "derust",
   "displayName": "Derust",
   "description": "AI-generated, line-anchored readings of Rust: module operations, function walkthroughs, spotlights, and ownership.",
-  "version": "0.9.0",
+  "version": "0.28.4",
   "publisher": "rsong",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -91,6 +91,11 @@
         "command": "derust.clearCache",
         "title": "Derust: Clear Analysis Cache",
         "icon": "$(trash)"
+      },
+      {
+        "command": "derust.analyzeArchitecture",
+        "title": "Derust: Analyze Architecture",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "menus": {
@@ -127,6 +132,9 @@
         },
         {
           "command": "derust.analyzeWorkspace"
+        },
+        {
+          "command": "derust.analyzeArchitecture"
         },
         {
           "command": "derust.openPanel"
@@ -252,5 +260,8 @@
         }
       }
     }
+  },
+  "dependencies": {
+    "elkjs": "^0.12.1"
   }
 }

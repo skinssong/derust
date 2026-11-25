@@ -1,4 +1,4 @@
-export const PROMPT_VERSION = '4';
+export const PROMPT_VERSION = '5';
 
 export const analysisJsonSchema = {
   type: 'object',

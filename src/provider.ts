@@ -14,9 +14,10 @@ export type ProviderSettings = {
 export type CompleteResult = {
   text: string;
   usage?: { input: number; output: number };
+  finishReason?: string;
 };
 
-type Message = { role: 'system' | 'user'; content: string };
+type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
 type ChatBody = {
   model: string;
@@ -37,14 +38,59 @@ export async function completeJson(
   settings: ProviderSettings,
   signal?: AbortSignal
 ): Promise<CompleteResult> {
+  return complete(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    settings,
+    signal
+  );
+}
+
+/**
+ * Second attempt after a reply that was not the requested JSON object: hand the
+ * model its own reply back and ask it to convert that reply into the JSON.
+ * Temperature is 0, so repeating the same request verbatim tends to reproduce
+ * the same failure; extending the conversation changes it.
+ */
+export async function completeJsonRepair(
+  system: string,
+  user: string,
+  previousReply: string,
+  settings: ProviderSettings,
+  signal?: AbortSignal
+): Promise<CompleteResult> {
+  const previous = previousReply.trim();
+  if (!previous) {
+    return completeJson(system, user, settings, signal);
+  }
+  return complete(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+      { role: 'assistant', content: previous.slice(-8000) },
+      {
+        role: 'user',
+        content:
+          'That reply was not the JSON object the task requires. Rewrite it as exactly the JSON object described in the instructions, beginning with { and ending with }. Return only the JSON.'
+      }
+    ],
+    settings,
+    signal
+  );
+}
+
+async function complete(
+  messages: Message[],
+  settings: ProviderSettings,
+  signal?: AbortSignal
+): Promise<CompleteResult> {
   const body: ChatBody = {
     model: settings.model,
     temperature: 0,
     max_tokens: settings.maxTokens,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user }
-    ],
+    messages,
     reasoning_effort: settings.reasoningEffort
   };
 
@@ -93,9 +139,10 @@ export async function completeJson(
     }
 
     const data = parseJson(raw);
-    const content = extractContent(data);
+    const finishReason = extractFinishReason(data);
+    const content = extractContent(data, finishReason);
     const usage = extractUsage(data);
-    return { text: stripFences(content), usage };
+    return { text: stripFences(content), usage, finishReason };
   }
 
   throw new Error('Provider request failed after retries.');
@@ -152,7 +199,7 @@ function isOpenCode(baseUrl: string): boolean {
   }
 }
 
-function extractContent(data: unknown): string {
+function extractContent(data: unknown, finishReason?: string): string {
   if (!isObject(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
     throw new Error('Provider response had no choices.');
   }
@@ -162,10 +209,15 @@ function extractContent(data: unknown): string {
     throw new Error('Provider response had no message.');
   }
 
+  const emptyMessage =
+    finishReason === 'length'
+      ? 'Provider hit the output cap before writing any text (finish_reason: length). Raise derust.maxOutputTokens or lower reasoning effort.'
+      : 'Provider returned an empty message. The output cap was probably consumed by reasoning tokens.';
+
   const content = choice.message.content;
   if (typeof content === 'string') {
     if (!content.trim()) {
-      throw new Error('Provider returned an empty message. The output cap was probably consumed by reasoning tokens.');
+      throw new Error(emptyMessage);
     }
     return content;
   }
@@ -180,6 +232,16 @@ function extractContent(data: unknown): string {
   }
 
   throw new Error('Provider response had no text content.');
+}
+
+function extractFinishReason(data: unknown): string | undefined {
+  if (!isObject(data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+    return undefined;
+  }
+  const choice = data.choices[0];
+  return isObject(choice) && typeof choice.finish_reason === 'string'
+    ? choice.finish_reason
+    : undefined;
 }
 
 function extractUsage(data: unknown): { input: number; output: number } | undefined {

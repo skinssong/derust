@@ -107,6 +107,7 @@ emitting JSON. If a request returns an empty message, raise
 | **Derust: Read & Analyze Current File** | Generates the module reading, then Spotlights and Ownership. Shortcut: `Cmd/Ctrl+Alt+R`. |
 | **Derust: Analyze Path…** | A single selected `.rs` file uses Read & Analyze; a folder runs analysis for selected files. |
 | **Derust: Analyze Workspace** | Runs the Spotlights/Ownership analysis for selected files in the workspace. |
+| **Derust: Analyze Architecture** | Builds a workspace architecture view from the index: components, calls and type uses between them, and the exact source lines behind each relationship. Filters the graph to calls, uses, or all (calls by default); an edge's label and the occurrences behind it follow the active filter. Nodes come in three fixed sizes (small / medium / large, by clustering comment-stripped code lines) and are tinted by role (amber = data module, sage = mixed); layout and orthogonal edge routes come from ELK's layered algorithm; modules that only wire others (a `lib.rs` of `pub mod`/`pub use`) are omitted; hover a component to trace its lines; double-click one to open its module with the Derust overview. The panel is tabbed: **Map** holds the architecture diagram; **Overview** holds the identity section with its file-cited evidence and a deeper-dive action; **Flow** draws the steps of one normal run as a process diagram (stages, tool branch, approval pause, halts), deliberately without file references, and **Reading** gives a five-to-eight step order for reading the run (entry, loop, one provider exchange, tool dispatch, recording, replay, resume), each step opening its files and their per-module briefs. |
 | **Derust: Open Panel** | Opens the cached reading or structural overview for the active Rust file. |
 | **Derust: Show File Overview** | Opens the Overview. It may start the reading when `derust.briefOnOverview` is on. |
 | **Derust: Rebuild Workspace Index** | Forces a fresh rust-analyzer index. |
@@ -179,9 +180,12 @@ refresh it. Startup restoration can reopen the last cached analysis or reading.
 
 ## Data and privacy
 
-Derust sends the selected Rust file, its module context, the prompt, and the
-project documents enabled by `derust.includeDocs` to the provider configured in
-`derust.baseUrl`. It does not send source code to a default service. The API key
+Derust sends the selected Rust file **with comments blanked** (line and
+column positions preserved, so every anchor still matches the editor), its
+module context, the prompt, and the project documents enabled by
+`derust.includeDocs` to the provider configured in `derust.baseUrl`. Doc
+comments are not sent and do not shape a reading; project documents are. A project
+narrative request sends only the derived fact sheet — no source text and no comments. It does not send source code to a default service. The API key
 is stored in VS Code SecretStorage; the base URL and model are stored in
 settings. Caches live in the extension's global storage and can be removed with
 **Derust: Clear Analysis Cache**. The extension has no telemetry.
@@ -208,5 +212,6 @@ Derust began as a fork of
 the upstream project is credited in `NOTICE`. The ownership timeline is
 inspired by [RustViz](https://github.com/rustviz/rustviz), and the stack/heap
 snapshot by [Aquascope](https://github.com/cognitive-engineering-lab/aquascope).
-Neither project is affiliated with or endorses Derust. See `NOTICE` for the
-full credits and licenses.
+Neither project is affiliated with or endorses Derust. The architecture view
+bundles Cytoscape.js (MIT) and elkjs (EPL-2.0). See `NOTICE` for the full
+credits and licenses.

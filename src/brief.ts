@@ -1,3 +1,4 @@
+import { blankComments } from './comments';
 import {
   BriefStep,
   FileBrief,
@@ -16,7 +17,7 @@ import {
 } from './profile';
 import { GENERAL_VOICE } from './voice';
 
-export const BRIEF_PROMPT_VERSION = 'brief-v13';
+export const BRIEF_PROMPT_VERSION = 'brief-v14';
 
 export type BriefSourceMeta = {
   file: string;
@@ -175,7 +176,7 @@ export function formatModuleContext(context: ModuleContext | undefined): string 
 }
 
 export function buildBriefUserPrompt(source: string, meta: BriefSourceMeta): string {
-  const lines = source.split(/\r?\n/);
+  const lines = blankComments(source).split(/\r?\n/);
   const numbered = lines
     .map((line, index) => `${String(index + 1).padStart(5, ' ')}  ${line}`)
     .join('\n');
@@ -212,7 +213,6 @@ export function buildBriefUserPrompt(source: string, meta: BriefSourceMeta): str
     `FILE: ${meta.file}`,
     `MODULE: ${meta.moduleContext?.modulePath ?? meta.overview.modulePath ?? 'unknown'}`,
     `CRATE: ${meta.crateName ?? 'unknown'}`,
-    `MODULE DOCS:\n${meta.overview.moduleDoc ?? '(none)'}`,
     `PROJECT CONTEXT:\n${meta.docs || '(none)'}`,
     `PUBLIC SURFACE:\n${publicSurface || '(none)'}`,
     `FUNCTIONS:\n${functions || '(none)'}`,

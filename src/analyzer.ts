@@ -17,6 +17,7 @@ import {
   Usage
 } from './contract';
 import { analysisJsonSchema, PROMPT_VERSION } from './schema';
+import { blankComments } from './comments';
 import { completeJson, ProviderSettings } from './provider';
 import { GENERAL_VOICE } from './voice';
 
@@ -74,7 +75,7 @@ export async function analyzeSource(
 }
 
 export function buildUserPrompt(source: string, meta: SourceMeta): string {
-  const lines = source.split(/\r?\n/);
+  const lines = blankComments(source).split(/\r?\n/);
   const numbered = lines
     .map((line, index) => `${String(index + 1).padStart(5, ' ')}  ${line}`)
     .join('\n');

@@ -22,6 +22,18 @@ project. These credits acknowledge prior art. If code or assets from either
 project are added later, their MIT copyright and permission notices must be
 included in this file.
 
+Bundled third-party libraries:
+
+- Cytoscape.js, https://js.cytoscape.org/
+  MIT License. The architecture view renders with Cytoscape.js; the library
+  and its license are bundled in media/cytoscape.min.js and
+  media/LICENSE-cytoscape.txt.
+
+- elkjs (Eclipse Layout Kernel for JavaScript), https://github.com/kieler/elkjs
+  Eclipse Public License 2.0 OR GPL-3.0-or-later. The architecture layout and
+  orthogonal edge routing are computed by elkjs; its license is bundled at
+  node_modules/elkjs/LICENSE.md.
+
 MIT License
 
 Copyright (c) 2026 trancedu

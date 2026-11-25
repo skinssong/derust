@@ -1,6 +1,9 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { analyzeSource, SourceMeta } from './analyzer';
+import { ArchitectureModel } from './architecture';
+import { ArchitecturePanel } from './architecturePanel';
+import { ArchitectureService } from './architectureService';
 import {
   BRIEF_PROMPT_VERSION,
   BRIEF_SYSTEM_PROMPT,
@@ -14,12 +17,18 @@ import { BriefCache } from './briefCache';
 import { AnalysisCache } from './cache';
 import { Analysis, CachedAnalysis, CachedBrief } from './contract';
 import { getConfig, importProviderSettings, messageOf, resolveApiKey } from './config';
+import { FlowCache } from './flowCache';
 import { IndexService } from './indexService';
+import { ReadingCache } from './readingCache';
+import { NarrativeCache } from './narrativeCache';
 import { OverviewLens, OverviewService } from './overviewLens';
 import { buildProfileCandidates } from './profile';
 import { ReaderPanel } from './panel';
 import { crateRoot, readCrateName } from './project';
-import { completeJson, ProviderSettings } from './provider';
+import { completeJson, completeJsonRepair, ProviderSettings } from './provider';
+import { buildFlowInput, extractJsonObject, FLOW_SYSTEM_PROMPT, linkFlowSources, parseFlowText } from './flow';
+import { buildReadingInput, parseReading, READING_SYSTEM_PROMPT } from './reading';
+import { buildNarrativeInput, NARRATIVE_SYSTEM_PROMPT } from './projectNarrative';
 import { PROMPT_VERSION } from './schema';
 
 type Current = {
@@ -44,6 +53,11 @@ let panelUri: vscode.Uri | undefined;
 let current: Current | undefined;
 let overviewLens: OverviewLens | undefined;
 let indexService: IndexService;
+let architectureService: ArchitectureService;
+let narrativeCache: NarrativeCache;
+let flowCache: FlowCache;
+let readingCache: ReadingCache;
+let architectureModel: ArchitectureModel | undefined;
 let briefController: AbortController | undefined;
 let briefTarget: string | undefined;
 const overviewService = new OverviewService();
@@ -78,6 +92,10 @@ export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Derust');
   overviewLens = new OverviewLens();
   indexService = new IndexService(context, overviewService, output);
+  architectureService = new ArchitectureService(context, overviewService, output);
+  narrativeCache = new NarrativeCache(context);
+  flowCache = new FlowCache(context);
+  readingCache = new ReadingCache(context);
 
   activeDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
@@ -103,6 +121,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('derust.analyzeFile', (uri?: vscode.Uri) => analyzeFile(uri)),
     vscode.commands.registerCommand('derust.analyzePath', (uri?: vscode.Uri) => analyzePath(uri)),
     vscode.commands.registerCommand('derust.analyzeWorkspace', () => analyzeWorkspace()),
+    vscode.commands.registerCommand('derust.analyzeArchitecture', () => analyzeArchitecture()),
     vscode.commands.registerCommand('derust.openPanel', () => openPanel()),
     vscode.commands.registerCommand('derust.showOverview', (uri?: vscode.Uri) => showOverview(uri)),
     vscode.commands.registerCommand('derust.rebuildIndex', () => rebuildIndex()),
@@ -219,6 +238,365 @@ async function analyzeWorkspace(): Promise<void> {
 
   const uris = await findRustFiles(root);
   await chooseAndAnalyze(uris);
+}
+
+function parseNarrative(text: string): string | undefined {
+  const cleaned = text
+    .trim()
+    .replace(/^```[a-zA-Z]*\s*\n?/, '')
+    .replace(/\n?```\s*$/, '')
+    .trim();
+  try {
+    const value = JSON.parse(cleaned) as Record<string, unknown>;
+    if (value && typeof value.narrative === 'string' && value.narrative.trim()) {
+      return value.narrative.trim();
+    }
+  } catch {
+    // Fall through to the raw text.
+  }
+  return cleaned ? cleaned.slice(0, 4000) : undefined;
+}
+
+function responseSnippet(text: string): string {
+  const value = text.replace(/\s+/g, ' ').trim();
+  return value.length > 160 ? `${value.slice(0, 160)}…` : value;
+}
+
+function parseReadingResponse(text: string, files: Set<string>): ReturnType<typeof parseReading> {
+  const value = extractJsonObject(text);
+  if (value === undefined) {
+    return undefined;
+  }
+  return parseReading(Array.isArray(value) ? { steps: value } : value, files);
+}
+
+async function writeReading(): Promise<void> {
+  const model = architectureModel;
+  if (!model) {
+    ArchitecturePanel.postReadingError('Run Derust: Analyze Architecture first.');
+    return;
+  }
+  const config = getConfig();
+  if (!config.baseUrl || !config.model) {
+    ArchitecturePanel.postReadingError(
+      'Set derust.baseUrl and derust.model first, or import provider settings.'
+    );
+    return;
+  }
+  const apiKey = await ensureApiKey();
+  if (!apiKey) {
+    ArchitecturePanel.postReadingError(
+      'No API key configured. Run Derust: Import Provider Settings from .env.'
+    );
+    return;
+  }
+
+  const settings: ProviderSettings = {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    apiKey,
+    jsonMode: config.jsonMode,
+    timeoutMs: config.timeoutSeconds * 1000,
+    maxTokens: Math.min(config.maxOutputTokens, 4000),
+    reasoningEffort: config.reasoningEffort === 'none' ? 'none' : 'low',
+    userAgent: `derust/${contextRef.extension.packageJSON.version}`
+  };
+  const files = new Set(model.nodes.flatMap((node) => node.modules));
+
+  try {
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Derust — ${model.meta.crate} reading order`,
+        cancellable: true
+      },
+      async (progress, token) => {
+        progress.report({ message: 'Planning a reading order…' });
+        const controller = new AbortController();
+        token.onCancellationRequested(() => controller.abort());
+        return completeJson(READING_SYSTEM_PROMPT, buildReadingInput(model), settings, controller.signal);
+      }
+    );
+    let reading = parseReadingResponse(result.text, files);
+    let last = result;
+    if (!reading) {
+      output.appendLine(
+        `[architecture] reading raw (finish=${result.finishReason ?? '?'}, usage=${JSON.stringify(result.usage ?? null)}): ${result.text.replace(/\s+/g, ' ').slice(0, 4000)}`
+      );
+      last = await completeJsonRepair(READING_SYSTEM_PROMPT, buildReadingInput(model), result.text, settings);
+      reading = parseReadingResponse(last.text, files);
+      if (!reading) {
+        output.appendLine(
+          `[architecture] reading retry raw (finish=${last.finishReason ?? '?'}, usage=${JSON.stringify(last.usage ?? null)}): ${last.text.replace(/\s+/g, ' ').slice(0, 4000)}`
+        );
+      }
+    }
+    if (!reading) {
+      throw new Error(
+        `The provider returned no usable reading order. Response began: “${responseSnippet(last.text)}”`
+      );
+    }
+    const generatedAt = new Date().toISOString();
+    readingCache.write(
+      model.meta.root,
+      readingCache.key(model.meta.revision, config.model),
+      { ...reading, model: config.model, revision: model.meta.revision, generatedAt }
+    );
+    ArchitecturePanel.postReading(reading);
+  } catch (error) {
+    output.appendLine(`[architecture] reading: ${messageOf(error)}`);
+    ArchitecturePanel.postReadingError(messageOf(error));
+  }
+}
+
+async function writeFlow(): Promise<void> {
+  const model = architectureModel;
+  if (!model) {
+    ArchitecturePanel.postFlowError('Run Derust: Analyze Architecture first.');
+    return;
+  }
+  const config = getConfig();
+  if (!config.baseUrl || !config.model) {
+    ArchitecturePanel.postFlowError(
+      'Set derust.baseUrl and derust.model first, or import provider settings.'
+    );
+    return;
+  }
+  const apiKey = await ensureApiKey();
+  if (!apiKey) {
+    ArchitecturePanel.postFlowError(
+      'No API key configured. Run Derust: Import Provider Settings from .env.'
+    );
+    return;
+  }
+
+  const settings: ProviderSettings = {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    apiKey,
+    jsonMode: config.jsonMode,
+    timeoutMs: config.timeoutSeconds * 1000,
+    maxTokens: Math.min(config.maxOutputTokens, 8000),
+    reasoningEffort: config.reasoningEffort === 'none' ? 'none' : 'low',
+    userAgent: `derust/${contextRef.extension.packageJSON.version}`
+  };
+
+  try {
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Derust — ${model.meta.crate} flow`,
+        cancellable: true
+      },
+      async (progress, token) => {
+        progress.report({ message: 'Tracing one run…' });
+        const controller = new AbortController();
+        token.onCancellationRequested(() => controller.abort());
+        return completeJson(FLOW_SYSTEM_PROMPT, buildFlowInput(model), settings, controller.signal);
+      }
+    );
+    let parsed = parseFlowText(result.text);
+    let last = result;
+    if (!parsed.spec) {
+      output.appendLine(
+        `[architecture] flow raw (finish=${result.finishReason ?? '?'}, usage=${JSON.stringify(result.usage ?? null)}): ${result.text.replace(/\s+/g, ' ').slice(0, 4000)}`
+      );
+      last = await completeJsonRepair(FLOW_SYSTEM_PROMPT, buildFlowInput(model), result.text, settings);
+      parsed = parseFlowText(last.text);
+      if (!parsed.spec) {
+        output.appendLine(
+          `[architecture] flow retry raw (finish=${last.finishReason ?? '?'}, usage=${JSON.stringify(last.usage ?? null)}): ${last.text.replace(/\s+/g, ' ').slice(0, 4000)}`
+        );
+      }
+    }
+    if (!parsed.spec) {
+      throw new Error(
+        `The provider returned no usable flow — ${parsed.reason ?? 'unknown reason'} (finish_reason: ${last.finishReason ?? 'unknown'}). Response began: “${responseSnippet(last.text)}”`
+      );
+    }
+    const flow = parsed.spec;
+    linkFlowSources(flow, model);
+    const generatedAt = new Date().toISOString();
+    flowCache.write(model.meta.root, flowCache.key(model.meta.revision, config.model), {
+      ...flow,
+      model: config.model,
+      revision: model.meta.revision,
+      generatedAt
+    });
+    ArchitecturePanel.postFlow(flow);
+  } catch (error) {
+    output.appendLine(`[architecture] flow: ${messageOf(error)}`);
+    ArchitecturePanel.postFlowError(messageOf(error));
+  }
+}
+
+async function writeProjectNarrative(): Promise<void> {
+  const model = architectureModel;
+  if (!model) {
+    ArchitecturePanel.postNarrativeError('Run Derust: Analyze Architecture first.');
+    return;
+  }
+  const config = getConfig();
+  if (!config.baseUrl || !config.model) {
+    ArchitecturePanel.postNarrativeError(
+      'Set derust.baseUrl and derust.model first, or import provider settings.'
+    );
+    return;
+  }
+  const apiKey = await ensureApiKey();
+  if (!apiKey) {
+    ArchitecturePanel.postNarrativeError(
+      'No API key configured. Run Derust: Import Provider Settings from .env.'
+    );
+    return;
+  }
+
+  const settings: ProviderSettings = {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    apiKey,
+    jsonMode: config.jsonMode,
+    timeoutMs: config.timeoutSeconds * 1000,
+    maxTokens: Math.min(config.maxOutputTokens, 2000),
+    reasoningEffort: config.reasoningEffort === 'none' ? 'none' : 'low',
+    userAgent: `derust/${contextRef.extension.packageJSON.version}`
+  };
+
+  try {
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Derust — ${model.meta.crate} narrative`,
+        cancellable: true
+      },
+      async (progress, token) => {
+        progress.report({ message: 'Writing project narrative…' });
+        const controller = new AbortController();
+        token.onCancellationRequested(() => controller.abort());
+        return completeJson(
+          NARRATIVE_SYSTEM_PROMPT,
+          buildNarrativeInput(model),
+          settings,
+          controller.signal
+        );
+      }
+    );
+    let narrative = parseNarrative(result.text);
+    let last = result;
+    if (!narrative) {
+      output.appendLine(
+        `[architecture] narrative raw (finish=${result.finishReason ?? '?'}, usage=${JSON.stringify(result.usage ?? null)}): ${result.text.replace(/\s+/g, ' ').slice(0, 4000)}`
+      );
+      last = await completeJsonRepair(NARRATIVE_SYSTEM_PROMPT, buildNarrativeInput(model), result.text, settings);
+      narrative = parseNarrative(last.text);
+      if (!narrative) {
+        output.appendLine(
+          `[architecture] narrative retry raw (finish=${last.finishReason ?? '?'}, usage=${JSON.stringify(last.usage ?? null)}): ${last.text.replace(/\s+/g, ' ').slice(0, 4000)}`
+        );
+      }
+    }
+    if (!narrative) {
+      throw new Error(
+        `The provider returned no narrative. Response began: “${responseSnippet(last.text)}”`
+      );
+    }
+    const generatedAt = new Date().toISOString();
+    narrativeCache.write(
+      model.meta.root,
+      narrativeCache.key(model.meta.revision, config.model),
+      { narrative, model: config.model, revision: model.meta.revision, generatedAt }
+    );
+    ArchitecturePanel.postNarrative({ text: narrative, generatedAt });
+  } catch (error) {
+    output.appendLine(`[architecture] narrative: ${messageOf(error)}`);
+    ArchitecturePanel.postNarrativeError(messageOf(error));
+  }
+}
+
+async function openModuleFromArchitecture(uri: vscode.Uri): Promise<void> {
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, {
+      viewColumn: vscode.ViewColumn.Active,
+      preview: false,
+      preserveFocus: false
+    });
+    await showOverview(uri);
+  } catch (error) {
+    output.appendLine(`[architecture] open module failed: ${messageOf(error)}`);
+    void vscode.window.showErrorMessage(`Derust: could not open ${uri.fsPath}`);
+  }
+}
+
+async function analyzeArchitecture(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  const uri =
+    (editor?.document.languageId === 'rust' ? editor.document.uri : undefined) ??
+    vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!uri) {
+    void vscode.window.showInformationMessage('Derust: open a Rust workspace first.');
+    return;
+  }
+
+  try {
+    const model = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Derust: analyzing architecture',
+        cancellable: true
+      },
+      (progress, token) => architectureService.build(uri, progress, token)
+    );
+    if (!model) {
+      void vscode.window.showInformationMessage('Derust: no Rust sources under src/.');
+      return;
+    }
+    architectureModel = model;
+    const config = getConfig();
+    const cachedNarrative = config.model
+      ? narrativeCache.read(
+          model.meta.root,
+          narrativeCache.key(model.meta.revision, config.model)
+        )
+      : undefined;
+    const cachedFlow = config.model
+      ? flowCache.read(model.meta.root, flowCache.key(model.meta.revision, config.model))
+      : undefined;
+    const cachedReading = config.model
+      ? readingCache.read(
+          model.meta.root,
+          readingCache.key(model.meta.revision, config.model)
+        )
+      : undefined;
+    ArchitecturePanel.show(
+      contextRef,
+      model,
+      {
+        onOpenModule: (uri) => {
+          void openModuleFromArchitecture(uri);
+        },
+        onWriteNarrative: () => {
+          void writeProjectNarrative();
+        },
+        onWriteFlow: () => {
+          void writeFlow();
+        },
+        onWriteReading: () => {
+          void writeReading();
+        }
+      },
+      cachedNarrative
+        ? { text: cachedNarrative.narrative, generatedAt: cachedNarrative.generatedAt }
+        : undefined,
+      cachedFlow,
+      cachedReading
+    );
+  } catch (error) {
+    output.appendLine(`[architecture] ${messageOf(error)}`);
+    void vscode.window.showErrorMessage(
+      `Derust: architecture analysis failed — ${messageOf(error)}`
+    );
+  }
 }
 
 async function openPanel(): Promise<void> {
@@ -392,7 +770,7 @@ async function attachBrief(
 
   let contextRevision = '';
   try {
-    contextRevision = (await indexService.currentRevision(uri)) ?? '';
+    contextRevision = (await withTimeout(indexService.currentRevision(uri), 10000)) ?? '';
   } catch (error) {
     output.appendLine(`[index] ${fileLabel}: ${messageOf(error)}`);
   }
@@ -540,7 +918,11 @@ async function explainFile(uri: vscode.Uri, force: boolean): Promise<void> {
 
   let moduleContext;
   try {
-    moduleContext = await indexService.getPacket(uri);
+    moduleContext = await withTimeout(indexService.getPacket(uri), 15000);
+    if (!moduleContext) {
+      output.appendLine(`[index] ${fileLabel}: packet unavailable or timed out`);
+      panel.setStatus('loading', 'Workspace index unavailable — writing without it…');
+    }
   } catch (error) {
     output.appendLine(`[index] ${fileLabel}: ${messageOf(error)}`);
   }
@@ -1495,6 +1877,13 @@ function applyValueColors(): void {
   }
 
   valueDecorations.forEach((type, index) => editor.setDecorations(type, ranges[index]));
+}
+
+function withTimeout<T>(promise: Thenable<T>, ms: number): Promise<T | undefined> {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => undefined),
+    new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))
+  ]);
 }
 
 function escapeRegExp(value: string): string {

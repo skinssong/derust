@@ -49,11 +49,15 @@ export class IndexService {
     }
 
     const started = Date.now();
+    this.output.appendLine(`[index] scanning ${root.fsPath}`);
     const snapshot = await this.snapshot(root);
-    const { files, documents, fileHashes, revision } = snapshot;
+    const { files, fileHashes, revision } = snapshot;
     if (files.length === 0) {
       return undefined;
     }
+    this.output.appendLine(
+      `[index] ${files.length} Rust files hashed in ${Date.now() - started}ms`
+    );
     const relFor = (file: vscode.Uri): string =>
       path.relative(root.fsPath, file.fsPath).split(path.sep).join('/');
 
@@ -67,11 +71,12 @@ export class IndexService {
     const targetRelative = relFor(uri);
     let target = modules[targetRelative];
     if (!target || cached?.fileHashes[targetRelative] !== fileHashes[targetRelative]) {
-      const document = documents.get(targetRelative);
-      if (!document) {
-        return undefined;
-      }
+      const document = await vscode.workspace.openTextDocument(uri);
+      const buildStarted = Date.now();
       const overview = await this.overviewService.build(document, 5000);
+      this.output.appendLine(
+        `[index] ${targetRelative}: overview built in ${Date.now() - buildStarted}ms`
+      );
       overview.file = targetRelative;
       overview.modulePath = modulePathFor(uri, root) ?? overview.modulePath;
       target = { overview };
@@ -168,24 +173,37 @@ export class IndexService {
     return snapshot.files.length > 0 ? snapshot.revision : undefined;
   }
 
+  /** Hashes the crate's files without opening a document for each one:
+   * open documents keep their unsaved text, everything else is read from
+   * disk. Opening every file used to dominate the index wait. */
   private async snapshot(root: vscode.Uri): Promise<{
     files: vscode.Uri[];
-    documents: Map<string, vscode.TextDocument>;
     fileHashes: Record<string, string>;
     revision: string;
   }> {
     const files = await this.findRustFiles(root);
-    const documents = new Map<string, vscode.TextDocument>();
+    const open = new Map<string, vscode.TextDocument>();
+    for (const document of vscode.workspace.textDocuments) {
+      open.set(document.uri.toString(), document);
+    }
     const fileHashes: Record<string, string> = {};
+    const decoder = new TextDecoder();
 
     for (const file of files) {
-      const document = await vscode.workspace.openTextDocument(file);
       const relative = path.relative(root.fsPath, file.fsPath).split(path.sep).join('/');
-      documents.set(relative, document);
-      fileHashes[relative] = sha256(document.getText());
+      const document = open.get(file.toString());
+      if (document) {
+        fileHashes[relative] = sha256(document.getText());
+        continue;
+      }
+      try {
+        fileHashes[relative] = sha256(decoder.decode(await vscode.workspace.fs.readFile(file)));
+      } catch {
+        // Unreadable files do not contribute to the revision.
+      }
     }
 
-    return { files, documents, fileHashes, revision: revisionFor(fileHashes) };
+    return { files, fileHashes, revision: revisionFor(fileHashes) };
   }
 
   async rebuild(uri: vscode.Uri): Promise<void> {
