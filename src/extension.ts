@@ -23,6 +23,7 @@ import { ReadingCache } from './readingCache';
 import { OverviewLens, OverviewService } from './overviewLens';
 import { buildProfileCandidates } from './profile';
 import { ReaderPanel } from './panel';
+import { PanelHost, PanelView } from './panelHost';
 import { crateRoot, readCrateName } from './project';
 import { completeJson, completeJsonRepair, ProviderSettings } from './provider';
 import { buildFlowInput, extractJsonObject, FLOW_SYSTEM_PROMPT, linkFlowSources, parseFlowText } from './flow';
@@ -145,6 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  PanelHost.onSwitch((view) => switchPanelView(view));
   void restoreLastAnalysis(context, false);
   restoreTimer = setTimeout(() => {
     if (!panel && !current) {
@@ -1474,6 +1476,28 @@ async function restoreLastAnalysis(context: vscode.ExtensionContext, force: bool
   }
 }
 
+function switchPanelView(view: PanelView): void {
+  if (view === 'project') {
+    if (ArchitecturePanel.reactivate()) {
+      return;
+    }
+    void vscode.commands.executeCommand('derust.analyzeArchitecture');
+    return;
+  }
+  if (panel && !panel.isDisposed) {
+    panel.activate();
+    return;
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (editor && editor.document.languageId === 'rust') {
+    void showOverview(editor.document.uri);
+    return;
+  }
+  void vscode.window.showInformationMessage(
+    'Derust: open a Rust file and run Read & Analyze to see its reading.'
+  );
+}
+
 function ensurePanel(uri: vscode.Uri): ReaderPanel {
   if (panel?.isDisposed) {
     panel = undefined;
@@ -1488,7 +1512,6 @@ function ensurePanel(uri: vscode.Uri): ReaderPanel {
           void readAndAnalyzeFile(target, force);
         }
       },
-      onImportEnv: () => void vscode.commands.executeCommand('derust.importEnv'),
       onScrolled: (line) => revealLineFromWebview(line)
     });
     contextRef.subscriptions.push(panel);

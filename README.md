@@ -53,7 +53,7 @@ regenerated.
 From the Marketplace, search for **Derust**, or install the local VSIX:
 
 ```bash
-code --install-extension release/derust-0.28.10.vsix
+code --install-extension release/derust-0.28.11.vsix
 ```
 
 For development, open this folder in VS Code and press `F5`.
@@ -116,8 +116,13 @@ emitting JSON. If a request returns an empty message, raise
 
 The panel header shows the file, model, line count, and reading state. Its
 **Read & Analyze** / **Re-analyze** button is the single action for the current
-file. **Import .env** is the provider setup shortcut. In Spotlights, a
-**Cards/Columns** button switches the layout.
+file. In Spotlights, a **Cards/Columns** button switches the layout.
+
+The file reading and the project view share one **Derust** panel. A
+**project | file** switch in either header moves between them: **project** holds
+the crate's opening line, flow and reading order, **file** holds the current
+file's overview, spotlights and ownership. Opening a file from the project view
+(which the flow stages and reading steps do) lands in the file view.
 
 ### Overview
 

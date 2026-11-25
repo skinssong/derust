@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { ArchitectureModel } from './architecture';
 import { FlowSpec } from './flow';
 import { ReadingSpec } from './reading';
+import { PanelHost } from './panelHost';
 
 export type ArchitectureHandlers = {
   onOpenModule: (uri: vscode.Uri) => void;
@@ -13,9 +14,17 @@ export type ArchitectureHandlers = {
 };
 
 export class ArchitecturePanel {
-  private static current: vscode.WebviewPanel | undefined;
   private static handlers: ArchitectureHandlers | undefined;
   private static root: string | undefined;
+  private static last:
+    | {
+        context: vscode.ExtensionContext;
+        model: ArchitectureModel;
+        flow?: FlowSpec;
+        reading?: ReadingSpec;
+        autoDraw: boolean;
+      }
+    | undefined;
 
   static show(
     context: vscode.ExtensionContext,
@@ -27,45 +36,76 @@ export class ArchitecturePanel {
   ): void {
     ArchitecturePanel.handlers = handlers;
     ArchitecturePanel.root = model.meta.root;
-    if (!ArchitecturePanel.current) {
-      ArchitecturePanel.current = vscode.window.createWebviewPanel(
-        'derust.architecture',
-        'Derust — architecture',
-        vscode.ViewColumn.Active,
-        {
-          enableScripts: true,
-          retainContextWhenHidden: true,
-          localResourceRoots: [context.extensionUri]
-        }
-      );
-      ArchitecturePanel.current.onDidDispose(() => {
-        ArchitecturePanel.current = undefined;
-      });
-      ArchitecturePanel.current.webview.onDidReceiveMessage((message: unknown) => {
-        ArchitecturePanel.handleMessage(message);
-      });
-    }
+    ArchitecturePanel.last = { context, model, flow, reading, autoDraw };
+    ArchitecturePanel.renderLast(autoDraw);
+  }
 
-    const panel = ArchitecturePanel.current;
-    panel.title = `Derust — project — ${model.meta.crate}`;
-    panel.webview.html = render(context.extensionUri, panel.webview, model, flow, reading, autoDraw);
-    panel.reveal(vscode.ViewColumn.Active, false);
+  static hasContent(): boolean {
+    return Boolean(ArchitecturePanel.last);
+  }
+
+  /** Bring the project view back without rebuilding the model. */
+  static reactivate(): boolean {
+    const last = ArchitecturePanel.last;
+    if (!last) {
+      return false;
+    }
+    ArchitecturePanel.renderLast(!last.flow && last.autoDraw);
+    return true;
   }
 
   static postFlow(flow: FlowSpec): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'flow', flow });
+    if (ArchitecturePanel.last) {
+      ArchitecturePanel.last.flow = flow;
+    }
+    if (PanelHost.view === 'project') {
+      PanelHost.post({ type: 'flow', flow });
+    }
   }
 
   static postFlowError(message: string): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'flowError', message });
+    if (ArchitecturePanel.last) {
+      ArchitecturePanel.last.autoDraw = false;
+    }
+    if (PanelHost.view === 'project') {
+      PanelHost.post({ type: 'flowError', message });
+    }
   }
 
   static postReading(reading: ReadingSpec): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'reading', reading });
+    if (ArchitecturePanel.last) {
+      ArchitecturePanel.last.reading = reading;
+    }
+    if (PanelHost.view === 'project') {
+      PanelHost.post({ type: 'reading', reading });
+    }
   }
 
   static postReadingError(message: string): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'readingError', message });
+    if (PanelHost.view === 'project') {
+      PanelHost.post({ type: 'readingError', message });
+    }
+  }
+
+  private static renderLast(autoDraw: boolean): void {
+    const last = ArchitecturePanel.last;
+    if (!last) {
+      return;
+    }
+    const panel = PanelHost.ensure(last.context);
+    PanelHost.register('project', (message: unknown) =>
+      ArchitecturePanel.handleMessage(message)
+    );
+    PanelHost.setView('project');
+    panel.webview.html = render(
+      last.context.extensionUri,
+      panel.webview,
+      last.model,
+      last.flow,
+      last.reading,
+      autoDraw
+    );
+    PanelHost.reveal(false);
   }
 
   private static handleMessage(message: unknown): void {

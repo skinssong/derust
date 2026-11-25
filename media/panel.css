@@ -1259,3 +1259,26 @@ code {
     align-items: flex-start;
   }
 }
+
+.viewswitch {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.viewswitch button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 8px;
+}
+
+.viewswitch button + button {
+  border-left: 1px solid var(--border);
+}
+
+.viewswitch button.active {
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.18));
+  color: var(--fg);
+}

@@ -21,3 +21,14 @@ test('the page has no cytoscape placeholder and renders its drawing state', () =
   assert.ok(html.includes('__AUTODRAW__'));
   assert.ok(!html.includes('__CYTOSCAPE__'));
 });
+
+test('both views expose the project and file switch', () => {
+  const panelJs = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'media', 'panel.js'),
+    'utf8'
+  );
+  assert.match(html, /type: 'switchView', view: button\.dataset\.view/);
+  assert.match(panelJs, /type: 'switchView', view: 'project'/);
+  assert.ok(!panelJs.includes("'Import .env'"));
+  assert.ok(!panelJs.includes("type: 'importEnv'"));
+});

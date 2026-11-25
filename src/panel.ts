@@ -2,13 +2,13 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Analysis, FileBrief, StructuralOverview, Usage } from './contract';
+import { PanelHost } from './panelHost';
 
 export type PanelLens = 'overview' | 'spotlights' | 'ownership';
 
 export type PanelCallbacks = {
   onReveal: (start: number, end: number) => void;
   onAnalyze: (force: boolean) => void;
-  onImportEnv: () => void;
   onScrolled: (line: number) => void;
 };
 
@@ -44,28 +44,20 @@ export type BriefPayload = {
 
 export class ReaderPanel implements vscode.Disposable {
   private readonly panel: vscode.WebviewPanel;
+  private readonly context: vscode.ExtensionContext;
   private readonly callbacks: PanelCallbacks;
+  private readonly history = new Map<string, unknown>();
   private disposed = false;
   private ready = false;
   private pending: unknown[] = [];
+  private sourceUri: vscode.Uri;
 
   static create(
     context: vscode.ExtensionContext,
     sourceUri: vscode.Uri,
     callbacks: PanelCallbacks
   ): ReaderPanel {
-    const panel = vscode.window.createWebviewPanel(
-      'derust.panel',
-      `Derust — ${path.basename(sourceUri.fsPath)}`,
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [context.extensionUri]
-      }
-    );
-
-    return new ReaderPanel(panel, context, sourceUri, callbacks);
+    return new ReaderPanel(PanelHost.ensure(context), context, sourceUri, callbacks);
   }
 
   private constructor(
@@ -75,26 +67,33 @@ export class ReaderPanel implements vscode.Disposable {
     callbacks: PanelCallbacks
   ) {
     this.panel = panel;
+    this.context = context;
+    this.sourceUri = sourceUri;
     this.callbacks = callbacks;
-    this.panel.webview.html = renderHtml(this.panel.webview, context.extensionUri);
 
-    this.panel.webview.onDidReceiveMessage(
-      (message: unknown) => this.handleMessage(message),
-      undefined,
-      []
-    );
+    PanelHost.register('file', (message: unknown) => this.handleMessage(message));
+    PanelHost.setView('file');
+    this.renderPage();
+
     this.panel.onDidDispose(() => {
       this.disposed = true;
       this.pending = [];
+      PanelHost.unregister('file');
     });
-
-    this.panel.title = `Derust — ${path.basename(sourceUri.fsPath)}`;
   }
 
   setSource(uri: vscode.Uri): void {
-    if (!this.disposed) {
-      this.panel.title = `Derust — ${path.basename(uri.fsPath)}`;
+    this.sourceUri = uri;
+  }
+
+  /** Show the file view again, re-rendering the page and replaying the last
+   * payloads (analysis, brief, status) that were sent to it. */
+  activate(): void {
+    if (this.disposed) {
+      return;
     }
+    this.renderPage();
+    PanelHost.reveal(false);
   }
 
   get isDisposed(): boolean {
@@ -114,6 +113,9 @@ export class ReaderPanel implements vscode.Disposable {
   }
 
   focusLens(lens: PanelLens): void {
+    if (PanelHost.view !== 'file') {
+      this.activate();
+    }
     this.send({ type: 'focusLens', lens });
   }
 
@@ -130,19 +132,47 @@ export class ReaderPanel implements vscode.Disposable {
   }
 
   reveal(): void {
-    if (!this.disposed) {
-      this.panel.reveal(vscode.ViewColumn.Beside, true);
+    if (this.disposed) {
+      return;
     }
+    if (PanelHost.view !== 'file') {
+      this.activate();
+      return;
+    }
+    PanelHost.reveal(true);
   }
 
   dispose(): void {
     if (!this.disposed) {
-      this.panel.dispose();
+      PanelHost.dispose();
     }
+  }
+
+  private renderPage(): void {
+    PanelHost.setView('file');
+    this.panel.webview.html = renderHtml(this.panel.webview, this.context.extensionUri);
+    this.ready = false;
+    this.pending = [...this.history.values()];
   }
 
   private send(message: unknown): void {
     if (this.disposed) {
+      return;
+    }
+    if (isObject(message) && typeof message.type === 'string') {
+      this.history.set(message.type, message);
+      if (this.history.size > 20) {
+        const oldest = this.history.keys().next().value;
+        if (oldest) {
+          this.history.delete(oldest);
+        }
+      }
+    }
+    if (PanelHost.view !== 'file') {
+      this.renderPage();
+      return;
+    }
+    if (PanelHost.view !== 'file') {
       return;
     }
     if (!this.ready) {
@@ -175,9 +205,6 @@ export class ReaderPanel implements vscode.Disposable {
         break;
       case 'reanalyze':
         this.callbacks.onAnalyze(true);
-        break;
-      case 'importEnv':
-        this.callbacks.onImportEnv();
         break;
       case 'scrolled':
         if (isNumber(message.line)) {

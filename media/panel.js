@@ -240,9 +240,12 @@ function renderHeader() {
   );
   controls.append(reanalyze);
 
-  const importButton = el('button', null, 'Import .env');
-  importButton.addEventListener('click', () => vscode.postMessage({ type: 'importEnv' }));
-  controls.append(importButton);
+  const views = el('div', 'viewswitch');
+  const projectTab = el('button', null, 'project');
+  projectTab.addEventListener('click', () => vscode.postMessage({ type: 'switchView', view: 'project' }));
+  const fileTab = el('button', 'active', 'file');
+  views.append(projectTab, fileTab);
+  controls.prepend(views);
 
   const layout = el('button', null, state.layout === 'columns' ? 'Cards' : 'Columns');
   layout.addEventListener('click', () => {
