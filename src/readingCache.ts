@@ -47,7 +47,7 @@ export class ReadingCache {
       const target = this.pathFor(root);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       const payload: Stored = { ...reading, key, version: CACHE_VERSION };
-      const temporary = `${target}.tmp`;
+      const temporary = `${target}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
       fs.writeFileSync(temporary, JSON.stringify(payload), 'utf8');
       fs.renameSync(temporary, target);
     } catch {

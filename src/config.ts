@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 
 export const API_KEY_SECRET = 'derust.apiKey';
@@ -17,6 +15,7 @@ export type ReaderConfig = {
   maxFiles: number;
   defaultLayout: 'cards' | 'columns';
   restoreLastAnalysis: boolean;
+  autoAnalyze: boolean;
   colorCode: boolean;
   overviewGlance: boolean;
   briefOnOverview: boolean;
@@ -39,6 +38,7 @@ export function getConfig(): ReaderConfig {
     maxFiles: Math.max(1, config.get<number>('maxFiles', 20)),
     defaultLayout: config.get<string>('defaultLayout', 'cards') === 'columns' ? 'columns' : 'cards',
     restoreLastAnalysis: config.get<boolean>('restoreLastAnalysis', true),
+    autoAnalyze: config.get<boolean>('autoAnalyze', true),
     colorCode: config.get<boolean>('colorCode', true),
     overviewGlance: config.get<boolean>('overviewGlance', true),
     briefOnOverview: config.get<boolean>('briefOnOverview', true)
@@ -47,11 +47,7 @@ export function getConfig(): ReaderConfig {
 
 export async function resolveApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {
   const stored = await context.secrets.get(API_KEY_SECRET);
-  if (stored?.trim()) {
-    return stored.trim();
-  }
-
-  return process.env.LLM_API_KEY?.trim() || undefined;
+  return stored?.trim() || undefined;
 }
 
 export type ProviderSetup = { config: ReaderConfig; apiKey: string };
@@ -72,13 +68,33 @@ function validateBaseUrl(value: string): string | undefined {
   return undefined;
 }
 
+let providerSetup: Promise<ProviderSetup | undefined> | undefined;
+
 /**
  * Return a usable provider configuration, asking for what is missing. The base
  * URL and model are written to the user's VS Code settings; the key goes to
  * SecretStorage. With `force`, every field is asked again and an empty key
- * keeps the stored one.
+ * keeps the stored one. Concurrent callers share one setup prompt.
  */
 export async function ensureProvider(
+  context: vscode.ExtensionContext,
+  options: { force?: boolean } = {}
+): Promise<ProviderSetup | undefined> {
+  if (options.force) {
+    return ensureProviderInner(context, options);
+  }
+  if (providerSetup) {
+    return providerSetup;
+  }
+  providerSetup = ensureProviderInner(context, options);
+  try {
+    return await providerSetup;
+  } finally {
+    providerSetup = undefined;
+  }
+}
+
+async function ensureProviderInner(
   context: vscode.ExtensionContext,
   options: { force?: boolean } = {}
 ): Promise<ProviderSetup | undefined> {
@@ -149,87 +165,6 @@ export async function ensureProvider(
   await context.secrets.store(API_KEY_SECRET, apiKey);
   config = { ...getConfig(), baseUrl, model };
   return { config, apiKey };
-}
-
-export async function importProviderSettings(context: vscode.ExtensionContext): Promise<boolean> {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const candidates = [
-    workspaceRoot ? path.join(workspaceRoot, 'harness', '.env') : undefined,
-    workspaceRoot ? path.join(workspaceRoot, '.env') : undefined,
-    path.join(context.extensionUri.fsPath, '.env')
-  ].filter((value): value is string => Boolean(value));
-
-  const existing = candidates.find((candidate) => fs.existsSync(candidate));
-  const value = await vscode.window.showInputBox({
-    title: 'Import provider settings',
-    prompt: 'Path to a .env file containing LLM_BASE_URL, LLM_API_KEY and LLM_MODEL',
-    value: existing ?? candidates[1] ?? '.env',
-    ignoreFocusOut: true
-  });
-
-  if (!value) {
-    return false;
-  }
-
-  try {
-    const parsed = parseEnvFile(value.trim());
-    const baseUrl = (parsed.LLM_BASE_URL ?? '').trim();
-    const apiKey = (parsed.LLM_API_KEY ?? '').trim();
-    const model = (parsed.LLM_MODEL ?? '').trim();
-
-    if (!baseUrl || !apiKey || !model) {
-      throw new Error('LLM_BASE_URL, LLM_API_KEY and LLM_MODEL are all required.');
-    }
-
-    const url = new URL(baseUrl);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      throw new Error('LLM_BASE_URL must be http(s).');
-    }
-
-    await context.secrets.store(API_KEY_SECRET, apiKey);
-    const config = vscode.workspace.getConfiguration('derust');
-    await config.update('baseUrl', baseUrl, vscode.ConfigurationTarget.Global);
-    await config.update('model', model, vscode.ConfigurationTarget.Global);
-
-    vscode.window.showInformationMessage(
-      `Derust: imported provider settings for ${model}. The API key is stored in SecretStorage.`
-    );
-    return true;
-  } catch (error) {
-    vscode.window.showErrorMessage(`Derust: could not import settings. ${messageOf(error)}`);
-    return false;
-  }
-}
-
-export function parseEnvFile(filePath: string): Record<string, string> {
-  const content = fs.readFileSync(filePath, 'utf8');
-  const result: Record<string, string> = {};
-
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) {
-      continue;
-    }
-
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!match) {
-      continue;
-    }
-
-    result[match[1]] = stripQuotes(match[2].trim());
-  }
-
-  return result;
-}
-
-function stripQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-  return value;
 }
 
 export function messageOf(error: unknown): string {

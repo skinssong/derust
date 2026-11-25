@@ -1,8 +1,8 @@
 {
   "name": "derust",
   "displayName": "Derust",
-  "description": "AI-generated, line-anchored readings of Rust: module operations, function walkthroughs, spotlights, and ownership.",
-  "version": "0.28.12",
+  "description": "AI-generated readings of Rust: a project view with an opening line, run flow and reading order, plus per-file module readings, spotlights and ownership.",
+  "version": "0.9.0",
   "publisher": "rsong",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -88,11 +88,6 @@
         "icon": "$(settings-gear)"
       },
       {
-        "command": "derust.importEnv",
-        "title": "Derust: Import Provider Settings from .env",
-        "icon": "$(key)"
-      },
-      {
         "command": "derust.clearCache",
         "title": "Derust: Clear Analysis Cache",
         "icon": "$(trash)"
@@ -157,9 +152,6 @@
           "command": "derust.configureProvider"
         },
         {
-          "command": "derust.importEnv"
-        },
-        {
           "command": "derust.clearCache"
         }
       ]
@@ -178,7 +170,7 @@
         "derust.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "OpenAI-compatible base URL, for example https://api.openai.com/v1. The extension POSTs to <baseUrl>/chat/completions. Set it with Derust: Import Provider Settings from .env or in settings."
+          "description": "OpenAI-compatible provider base URL, for example https://api.openai.com/v1. The extension POSTs to <baseUrl>/chat/completions. Set it here or with Derust: Configure Provider."
         },
         "derust.model": {
           "type": "string",
@@ -246,6 +238,11 @@
           "default": "cards",
           "description": "Default spotlight layout."
         },
+        "derust.autoAnalyze": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start Read & Analyze automatically when a file's Derust view opens; cached results are reused."
+        },
         "derust.restoreLastAnalysis": {
           "type": "boolean",
           "default": true,
@@ -264,7 +261,7 @@
         "derust.briefOnOverview": {
           "type": "boolean",
           "default": true,
-          "description": "Generate the AI module reading when you open the file overview from the glance or Show File Overview command. The reading is cached per file content; turn this off to use the Explain this file button instead."
+          "description": "When derust.autoAnalyze is off, start just the AI module reading when the file overview opens. With auto analysis on, Read & Analyze covers it."
         }
       }
     }

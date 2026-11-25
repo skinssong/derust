@@ -1,23 +1,29 @@
 # Derust
 
-Derust is a VS Code extension for reading unfamiliar Rust. It opens a pane
-beside the code and explains the file with AI-generated, line-anchored readings:
-module behavior, key operations, function walkthroughs, Rust syntax highlights,
-ownership, and memory diagrams.
+Derust is a VS Code extension for reading unfamiliar Rust. One panel explains a
+workspace from the top down: what the project is and how a normal run flows,
+then the file you open — module behavior, key operations, Rust syntax and
+ownership.
 
 ## What it is
 
-Derust has three views:
+Derust has one panel with two modes, switched from its header:
 
-- **Overview** — the module reading: role, purpose, boundaries, key operations,
-  walkthroughs for the key functions, and the rules that need explaining. Before
-  a reading exists, it shows a deterministic structural overview built from the
-  source.
-- **Spotlights** — the Rust constructs that are easy to misread: lifetimes,
-  borrows and moves, async, trait objects, derives, attributes, and dense idioms.
-  Each one says what it means, what it expands to, and the common trap.
-- **Ownership** — memory models for the key functions, with lifetimes, moves,
-  borrows, clones, heap objects, and a stack/heap snapshot at the current line.
+- **Project** — the crate-level view: an opening line that names the project and
+  what one use does, a flow diagram of one normal run (stages, decisions,
+  branches and loops, each labelled with the module that does the work), and a
+  suggested reading order for understanding the run.
+- **File** — the current file, in three tabs:
+  - **Overview** — the module reading: role, purpose, boundaries, key
+    operations, walkthroughs for the key functions, and the rules that need
+    explaining. Before a reading exists it shows a deterministic structural
+    overview built from the source.
+  - **Spotlights** — the Rust constructs that are easy to misread: lifetimes,
+    borrows and moves, async, trait objects, derives, attributes, and dense
+    idioms. Each says what it means, what it expands to, and the common trap.
+  - **Ownership** — memory models for the key functions, with lifetimes, moves,
+    borrows, clones, heap objects, and a stack/heap snapshot at the current
+    line.
 
 The reading uses a workspace index built through rust-analyzer for module paths,
 public surface, callers, callees, tests, imports, and crate dependencies. The
@@ -25,52 +31,55 @@ structural index is built first and cached locally. Call-graph relations are
 refreshed in the background and are used by the next reading; the first reading
 can use the structural packet while those relations are still being built.
 
-`Read & Analyze` is the single action for the current file. It generates the
-module reading first, then the Spotlights and Ownership analysis. The two
-artifacts have separate caches, so one can be reused while the other is
-regenerated.
+The panel opens with the work already running. **Project** draws the flow and
+plans the reading order together, then writes the opening line from the flow;
+**File** starts Read & Analyze, generating the module reading and the
+Spotlights/Ownership analysis in parallel. Cached results are reused, so
+reopening is instant; the pane buttons force a redraw or a fresh analysis.
 
-## Preview
+## The panel
 
-![Derust Read & Analyze workflow: Overview, Spotlights, Ownership](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/analyze.gif)
+One panel, two modes. The header stays in place; click **Project** or **File**.
 
-*Read & Analyze a single file: the module reading opens in Overview, then Spotlights and Ownership fill from the same file analysis.*
+![Derust project view: opening line, flow of one run, and reading order](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/derust-project.gif)
 
-![Derust Overview with the module reading beside agent.rs](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/overview.png)
+*Project: the opening line at the top, the flow of one normal run on the left —
+each stage labelled with the module that does the work — and a suggested reading
+order on the right. Both are planned automatically when the view opens.*
 
-*Overview: module role, purpose, key operations, and key-function walkthroughs, anchored to the source.*
+![Derust file view: module reading, spotlights and ownership](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/derust-file.gif)
 
-![Derust Spotlights with Rust construct explanations](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/spotlights.png)
-
-*Spotlights: the Rust constructs that are easy to misread, with meaning, expansion, and the common trap.*
-
-![Derust Ownership timeline and stack/heap snapshot](https://raw.githubusercontent.com/skinssong/derust/main/media/screenshots/ownership.png)
-
-*Ownership: memory records for key functions, lifetime lanes, events, and a stack/heap snapshot at the current line.*
+*File: the module reading, Rust construct spotlights and the ownership timeline
+for the current file. Read & Analyze starts by itself; the tabs and scrolling
+work in the same panel.*
 
 ## Install
 
 From the Marketplace, search for **Derust**, or install the local VSIX:
 
 ```bash
-code --install-extension release/derust-0.28.12.vsix
+code --install-extension release/derust-0.9.0.vsix
 ```
 
 For development, open this folder in VS Code and press `F5`.
 
 ## Configure
 
-The first AI request asks for what it needs, directly in VS Code:
+The first AI request — Analyze Architecture, Read & Analyze, or the analysis
+that starts when a view opens — asks for the provider settings in VS Code:
 
-- **Base URL** and **model** are written to your user settings (`derust.baseUrl`,
-  `derust.model`). The base URL is OpenAI-compatible; Derust appends
-  `/chat/completions`, so do not include that path.
-- **API key** goes to VS Code SecretStorage, never to `settings.json`.
+1. **Base URL** — an OpenAI-compatible endpoint, for example
+   `https://api.openai.com/v1`. Derust appends `/chat/completions`, so do not
+   include that path. It is saved to `derust.baseUrl`.
+2. **Model** — the model id sent to the provider, saved to `derust.model`.
+3. **API key** — stored in VS Code **SecretStorage**, never in `settings.json`.
 
-Run **Derust: Configure Provider** to change them later; leave the key empty
-there to keep the stored one. If you prefer a file, **Derust: Import Provider
-Settings from .env** still reads `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`
-from a `.env`.
+The URL and model live in your user settings, where they can be edited or
+synced. The key is held by VS Code's secret store and applies to every AI
+request.
+
+Run **Derust: Configure Provider** at any time to change them; leave the key
+blank there to keep the current one.
 
 ### Settings
 
@@ -90,33 +99,40 @@ from a `.env`.
 | `derust.restoreLastAnalysis` | `true` | Reopen the last cached reading or analysis at startup. |
 | `derust.colorCode` | `true` | Color identifiers in the editor to match memory lanes. |
 | `derust.overviewGlance` | `true` | Show the one-line Overview link above the first source line. |
-| `derust.briefOnOverview` | `true` | Start the module reading when the Overview opens; turn off to wait for **Read & Analyze**. |
+| `derust.autoAnalyze` | `true` | Start Read & Analyze when a file's Derust view opens; cached results are reused. |
+| `derust.briefOnOverview` | `true` | With `autoAnalyze` off, start only the module reading when the Overview opens. |
 
 Provider note: reasoning models can consume the whole output budget before
 emitting JSON. If a request returns an empty message, raise
 `derust.maxOutputTokens` or lower `derust.reasoningEffort`.
 
+Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
 ## Key commands
 
 | Command | What it does |
 |---|---|
-| **Derust: Read & Analyze Current File** | Generates the module reading, then Spotlights and Ownership. Shortcut: `Cmd/Ctrl+Alt+R`. |
+| **Derust: Read & Analyze Current File** | Forces a fresh run for the active file. Normally starts automatically when the File view opens. Shortcut: `Cmd/Ctrl+Alt+R`. |
 | **Derust: Analyze Path…** | A single selected `.rs` file uses Read & Analyze; a folder runs analysis for selected files. |
 | **Derust: Analyze Workspace** | Runs the Spotlights/Ownership analysis for selected files in the workspace. |
-| **Derust: Analyze Architecture** | Builds the project view from the analyzed source: an opening line written from one normal run, a flow diagram of that run (stages, decisions, labelled branches and loops, each stage labelled with the module that does the work and clickable to open it in the editor), and a five-to-eight step reading order for the run. The opening line is written from the flow alone — stage titles, kinds, descriptions and transitions, plus the derived archetype and entry point; comments and source never shape it. Running the command opens the view; when no cached run exists it draws the run and then writes the opening line automatically. |
+| **Derust: Analyze Architecture** | Builds the project view from the analyzed source: an opening line written from one normal run, a flow diagram of that run (stages, decisions, labelled branches and loops, each stage labelled with the module that does the work and clickable to open it in the editor), and a five-to-eight step reading order for the run. The opening line is written from the flow alone — stage titles, kinds, descriptions and transitions, plus the derived archetype and entry point; comments and source never shape it. Running the command opens the view and starts the work: the flow and the
+reading order are planned together, and the opening line is written from the
+flow when it is ready. Cached results show immediately; the pane buttons force
+a redraw or replan. |
 | **Derust: Open Panel** | Opens the cached reading or structural overview for the active Rust file. |
-| **Derust: Show File Overview** | Opens the Overview. It may start the reading when `derust.briefOnOverview` is on. |
+| **Derust: Show File Overview** | Opens the Overview; with `derust.autoAnalyze` on, the analysis starts by itself. |
 | **Derust: Rebuild Workspace Index** | Forces a fresh rust-analyzer index. |
 | **Derust: Show Index Packet** | Opens the index evidence for the current file. |
 | **Derust: Configure Provider** | Asks for the base URL, model and API key; settings go to VS Code settings, the key to SecretStorage. |
-| **Derust: Import Provider Settings from .env** | Reads provider settings and stores the key in SecretStorage. |
 | **Derust: Clear Analysis Cache** | Removes cached analyses and readings. |
 
 ## Navigate the panel
 
 The panel header shows the file, model, line count, and reading state. Its
-**Read & Analyze** / **Re-analyze** button is the single action for the current
-file. In Spotlights, a **Cards/Columns** button switches the layout.
+**Read & Analyze** runs by itself when the file view opens, with the module
+reading and the full analysis in parallel; cached results are reused, so
+reopening is instant. The **Read & Analyze** / **Re-analyze** button forces a
+fresh run. In Spotlights, a **Cards/Columns** button switches the layout.
 
 The file reading and the project view share one **Derust** panel. Its header
 reads **Derust Project / File**: clicking either name switches views, and the

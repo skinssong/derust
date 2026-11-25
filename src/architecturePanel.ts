@@ -24,6 +24,7 @@ export class ArchitecturePanel {
         reading?: ReadingSpec;
         autoDraw: boolean;
         fileAvailable: boolean;
+        readingLoading: boolean;
       }
     | undefined;
 
@@ -34,11 +35,20 @@ export class ArchitecturePanel {
     flow?: FlowSpec,
     reading?: ReadingSpec,
     autoDraw = false,
-    fileAvailable = false
+    fileAvailable = false,
+    readingLoading = false
   ): void {
     ArchitecturePanel.handlers = handlers;
     ArchitecturePanel.root = model.meta.root;
-    ArchitecturePanel.last = { context, model, flow, reading, autoDraw, fileAvailable };
+    ArchitecturePanel.last = {
+      context,
+      model,
+      flow,
+      reading,
+      autoDraw,
+      fileAvailable,
+      readingLoading
+    };
     ArchitecturePanel.renderLast(autoDraw);
   }
 
@@ -87,13 +97,26 @@ export class ArchitecturePanel {
   static postReading(reading: ReadingSpec): void {
     if (ArchitecturePanel.last) {
       ArchitecturePanel.last.reading = reading;
+      ArchitecturePanel.last.readingLoading = false;
     }
     if (PanelHost.view === 'project') {
       PanelHost.post({ type: 'reading', reading });
     }
   }
 
+  static postReadingLoading(): void {
+    if (ArchitecturePanel.last) {
+      ArchitecturePanel.last.readingLoading = true;
+    }
+    if (PanelHost.view === 'project') {
+      PanelHost.post({ type: 'readingLoading' });
+    }
+  }
+
   static postReadingError(message: string): void {
+    if (ArchitecturePanel.last) {
+      ArchitecturePanel.last.readingLoading = false;
+    }
     if (PanelHost.view === 'project') {
       PanelHost.post({ type: 'readingError', message });
     }
@@ -116,7 +139,8 @@ export class ArchitecturePanel {
       last.flow,
       last.reading,
       autoDraw,
-      last.fileAvailable
+      last.fileAvailable,
+      last.readingLoading
     );
     PanelHost.reveal(false);
   }
@@ -169,7 +193,8 @@ function render(
   flow?: FlowSpec,
   reading?: ReadingSpec,
   autoDraw = false,
-  fileAvailable = false
+  fileAvailable = false,
+  readingLoading = false
 ): string {
   const template = fs.readFileSync(
     path.join(extensionUri.fsPath, 'media', 'architecture.html'),
@@ -187,6 +212,7 @@ function render(
     .replace(/__NONCE__/g, () => nonce)
     .replace('__AUTODRAW__', () => (autoDraw ? 'true' : 'false'))
     .replace('__FILEAVAILABLE__', () => (fileAvailable ? 'true' : 'false'))
+    .replace('__READINGLOADING__', () => (readingLoading ? 'true' : 'false'))
     .replace('__DATA__', () => data)
     .replace('__FLOW__', () => flowJson)
     .replace('__READING__', () => readingJson);

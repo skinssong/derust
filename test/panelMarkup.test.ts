@@ -36,6 +36,4 @@ test('both views expose the project and file switch', () => {
     'utf8'
   );
   assert.match(panelTs, /<nav class="views"/);
-  assert.ok(!panelJs.includes("'Import .env'"));
-  assert.ok(!panelJs.includes("type: 'importEnv'"));
 });

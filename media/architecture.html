@@ -31,6 +31,7 @@ const FLOW = __FLOW__;
 const READING = __READING__;
 let reading = READING;
 let readingError = null;
+let readingLoading = __READINGLOADING__;
 let flow = FLOW;
 let flowError = null;
 let flowDrawing = __AUTODRAW__;
@@ -271,6 +272,14 @@ const readingDoc = document.getElementById('readingDoc');
 function renderReading(){
   readingDoc.textContent='';
   if(!reading){
+    if(readingLoading){
+      readingDoc.append(el('p','side-copy','Planning an order for reading one normal run: entry and dispatch, the loop, one provider exchange, tool dispatch, recording, then replay and resume.'));
+      readingDoc.append(el('p','note','The order appears once the plan is ready.'));
+      const waiting=el('button','brief-item','planning…');
+      waiting.disabled=true;
+      readingDoc.append(waiting);
+      return;
+    }
     readingDoc.append(el('p','side-copy','Plan an order for reading one normal run: entry and dispatch, the loop, one provider exchange, tool dispatch, recording, then replay and resume. Only the order, with the files each step needs.'));
     if(readingError) readingDoc.append(el('p','note',readingError));
     const button=el('button','brief-item','suggest a reading order');
@@ -326,12 +335,15 @@ window.addEventListener('message',(event)=>{
   } else if(message.type === 'flowError' && typeof message.message === 'string'){
     flowError = message.message; flowDrawing = false;
     renderFlow();
+  } else if(message.type === 'readingLoading'){
+    readingLoading = true;
+    renderReading();
   } else if(message.type === 'reading' && message.reading){
-    reading = message.reading; readingError = null;
+    reading = message.reading; readingError = null; readingLoading = false;
     renderReading();
     restoreScroll();
   } else if(message.type === 'readingError' && typeof message.message === 'string'){
-    readingError = message.message;
+    readingError = message.message; readingLoading = false;
     renderReading();
   }
 });

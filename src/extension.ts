@@ -16,7 +16,7 @@ import {
 import { BriefCache } from './briefCache';
 import { AnalysisCache } from './cache';
 import { Analysis, CachedAnalysis, CachedBrief } from './contract';
-import { ensureProvider, getConfig, importProviderSettings, messageOf } from './config';
+import { ensureProvider, getConfig, messageOf } from './config';
 import { FlowCache } from './flowCache';
 import { IndexService } from './indexService';
 import { ReadingCache } from './readingCache';
@@ -58,6 +58,8 @@ let flowCache: FlowCache;
 let readingCache: ReadingCache;
 let architectureModel: ArchitectureModel | undefined;
 let flowRunning = false;
+let readingRunning = false;
+const analysisRunning = new Set<string>();
 let briefController: AbortController | undefined;
 let briefTarget: string | undefined;
 const overviewService = new OverviewService();
@@ -133,7 +135,6 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
     }),
-    vscode.commands.registerCommand('derust.importEnv', () => importProviderSettings(context)),
     vscode.commands.registerCommand('derust.clearCache', () => clearCache()),
     vscode.window.onDidChangeTextEditorSelection((event) => handleSelection(event)),
     vscode.window.onDidChangeTextEditorVisibleRanges((event) => handleVisibleRanges(event)),
@@ -267,6 +268,18 @@ function parseReadingResponse(text: string, files: Set<string>): ReturnType<type
 }
 
 async function writeReading(): Promise<void> {
+  if (readingRunning) {
+    return;
+  }
+  readingRunning = true;
+  try {
+    await writeReadingInner();
+  } finally {
+    readingRunning = false;
+  }
+}
+
+async function writeReadingInner(): Promise<void> {
   const model = architectureModel;
   if (!model) {
     ArchitecturePanel.postReadingError('Run Derust: Analyze Architecture first.');
@@ -290,6 +303,7 @@ async function writeReading(): Promise<void> {
     userAgent: `derust/${contextRef.extension.packageJSON.version}`
   };
   const files = new Set(model.nodes.flatMap((node) => node.modules));
+  ArchitecturePanel.postReadingLoading();
 
   try {
     const result = await vscode.window.withProgress(
@@ -341,6 +355,15 @@ async function writeFlow(): Promise<void> {
   if (flowRunning) {
     return;
   }
+  flowRunning = true;
+  try {
+    await writeFlowInner();
+  } finally {
+    flowRunning = false;
+  }
+}
+
+async function writeFlowInner(): Promise<void> {
   const model = architectureModel;
   if (!model) {
     ArchitecturePanel.postFlowError('Run Derust: Analyze Architecture first.');
@@ -353,7 +376,6 @@ async function writeFlow(): Promise<void> {
   }
   const { config, apiKey } = provider;
 
-  flowRunning = true;
   const settings: ProviderSettings = {
     baseUrl: config.baseUrl,
     model: config.model,
@@ -466,8 +488,6 @@ async function writeFlow(): Promise<void> {
   } catch (error) {
     output.appendLine(`[architecture] flow: ${messageOf(error)}`);
     ArchitecturePanel.postFlowError(messageOf(error));
-  } finally {
-    flowRunning = false;
   }
 }
 
@@ -538,10 +558,14 @@ async function analyzeArchitecture(): Promise<void> {
       cachedFlow,
       cachedReading,
       autoDraw,
-      fileViewAvailable()
+      fileViewAvailable(),
+      !cachedReading
     );
     if (autoDraw) {
       void writeFlow();
+    }
+    if (!cachedReading) {
+      void writeReading();
     }
   } catch (error) {
     output.appendLine(`[architecture] ${messageOf(error)}`);
@@ -570,6 +594,7 @@ async function openPanel(): Promise<void> {
       const hit = await readCachedForUri(uri);
       if (hit) {
         await showAnalysis(uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+        autoAnalyzeOverview(uri);
       } else {
         await showStructuralOverview(uri, true);
       }
@@ -592,6 +617,7 @@ async function openPanel(): Promise<void> {
       const hit = await readCachedForUri(current.uri);
       if (hit) {
         await showAnalysis(current.uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+        autoAnalyzeOverview(current.uri);
         return;
       }
     } catch (error) {
@@ -604,6 +630,18 @@ async function openPanel(): Promise<void> {
   }
 
   vscode.window.showInformationMessage('Derust: open a Rust file first.');
+}
+
+/** Start the file view's automatic work after it has been shown, whether the
+ * overview came from the cache or from source. Reuses caches, and the
+ * per-file in-flight guard makes a repeat call a no-op. */
+function autoAnalyzeOverview(uri: vscode.Uri): void {
+  const config = getConfig();
+  if (config.autoAnalyze) {
+    void readAndAnalyzeFile(uri, false);
+  } else if (config.briefOnOverview) {
+    void explainFile(uri, false);
+  }
 }
 
 async function showOverview(uri?: vscode.Uri): Promise<void> {
@@ -625,6 +663,7 @@ async function showOverview(uri?: vscode.Uri): Promise<void> {
     const hit = await readCachedForUri(uri);
     if (hit) {
       await showAnalysis(uri, hit.fileLabel, hit.cached, getConfig().defaultLayout);
+      autoAnalyzeOverview(uri);
     } else {
       await showStructuralOverview(uri, true);
     }
@@ -634,11 +673,6 @@ async function showOverview(uri?: vscode.Uri): Promise<void> {
   }
 
   panel?.focusLens('overview');
-
-  const config = getConfig();
-  if (config.briefOnOverview && config.baseUrl && config.model) {
-    void explainFile(uri, false);
-  }
 }
 
 async function showStructuralOverview(uri: vscode.Uri, reveal: boolean): Promise<void> {
@@ -697,6 +731,13 @@ async function showStructuralOverview(uri: vscode.Uri, reveal: boolean): Promise
   }
 
   void attachBrief(uri, fileLabel, sourceHash);
+
+  const config = getConfig();
+  if (reveal && config.autoAnalyze) {
+    void readAndAnalyzeFile(uri, false);
+  } else if (reveal && config.briefOnOverview) {
+    void explainFile(uri, false);
+  }
 }
 
 function cancelBrief(): void {
@@ -1556,7 +1597,8 @@ async function revealRange(start: number, end: number): Promise<void> {
 
 
 async function readAndAnalyzeFile(uri: vscode.Uri, force: boolean): Promise<void> {
-  if (!force && briefTarget === uri.toString() && briefController) {
+  const key = uri.toString();
+  if (!force && analysisRunning.has(key)) {
     return;
   }
   const target = ensurePanel(uri);
@@ -1564,12 +1606,17 @@ async function readAndAnalyzeFile(uri: vscode.Uri, force: boolean): Promise<void
   target.setSource(uri);
   target.reveal();
 
-  await explainFile(uri, force);
-
+  analysisRunning.add(key);
   try {
-    await analyzeUri(uri, { force, showPanel: true });
-  } catch (error) {
-    vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+    const brief = explainFile(uri, force).catch((error) => {
+      output.appendLine(`[brief] ${messageOf(error)}`);
+    });
+    const analysis = analyzeUri(uri, { force, showPanel: true }).catch((error) => {
+      vscode.window.showErrorMessage(`Derust: ${messageOf(error)}`);
+    });
+    await Promise.all([brief, analysis]);
+  } finally {
+    analysisRunning.delete(key);
   }
 }
 
