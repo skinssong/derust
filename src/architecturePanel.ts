@@ -22,7 +22,8 @@ export class ArchitecturePanel {
     model: ArchitectureModel,
     handlers?: ArchitectureHandlers,
     flow?: FlowSpec,
-    reading?: ReadingSpec
+    reading?: ReadingSpec,
+    autoDraw = false
   ): void {
     ArchitecturePanel.handlers = handlers;
     ArchitecturePanel.root = model.meta.root;
@@ -47,12 +48,8 @@ export class ArchitecturePanel {
 
     const panel = ArchitecturePanel.current;
     panel.title = `Derust — project — ${model.meta.crate}`;
-    panel.webview.html = render(context.extensionUri, panel.webview, model, flow, reading);
+    panel.webview.html = render(context.extensionUri, panel.webview, model, flow, reading, autoDraw);
     panel.reveal(vscode.ViewColumn.Active, false);
-  }
-
-  static postFlowDrawing(): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'flowDrawing' });
   }
 
   static postFlow(flow: FlowSpec): void {
@@ -117,7 +114,8 @@ function render(
   webview: vscode.Webview,
   model: ArchitectureModel,
   flow?: FlowSpec,
-  reading?: ReadingSpec
+  reading?: ReadingSpec,
+  autoDraw = false
 ): string {
   const template = fs.readFileSync(
     path.join(extensionUri.fsPath, 'media', 'architecture.html'),
@@ -133,6 +131,7 @@ function render(
   return template
     .replace('__CSP__', () => `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';`)
     .replace(/__NONCE__/g, () => nonce)
+    .replace('__AUTODRAW__', () => (autoDraw ? 'true' : 'false'))
     .replace('__DATA__', () => data)
     .replace('__FLOW__', () => flowJson)
     .replace('__READING__', () => readingJson);

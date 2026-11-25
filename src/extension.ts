@@ -521,6 +521,7 @@ async function analyzeArchitecture(): Promise<void> {
           readingCache.key(model.meta.revision, config.model)
         )
       : undefined;
+    const autoDraw = !cachedFlow || !cachedFlow.brief;
     ArchitecturePanel.show(
       contextRef,
       model,
@@ -536,10 +537,10 @@ async function analyzeArchitecture(): Promise<void> {
         }
       },
       cachedFlow,
-      cachedReading
+      cachedReading,
+      autoDraw
     );
-    if (!cachedFlow || !cachedFlow.brief) {
-      ArchitecturePanel.postFlowDrawing();
+    if (autoDraw) {
       void writeFlow();
     }
   } catch (error) {

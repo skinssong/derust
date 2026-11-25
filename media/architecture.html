@@ -33,7 +33,7 @@ let reading = READING;
 let readingError = null;
 let flow = FLOW;
 let flowError = null;
-let flowDrawing = false;
+let flowDrawing = __AUTODRAW__;
 const vscodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
 const stats = document.getElementById('stats');
