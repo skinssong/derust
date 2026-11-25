@@ -9,7 +9,7 @@
 :root{--ink:#1e2320;--paper:#f2f3ed;--paper2:#f8f6ee;--paper3:#ebe9dd;--line:#d1d2c5;--muted:#647064;--rust:#a8431f;--amber:#b4652f;--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--mono:"SF Mono","Cascadia Code",Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);font:14px/1.45 var(--serif)}body{overflow:hidden}.app{height:100vh;display:flex;flex-direction:column}
 .top{flex:0 0 54px;display:flex;align-items:center;gap:14px;padding:0 22px;background:#202520;color:var(--paper);border-bottom:3px solid var(--rust)}.brand{font-size:19px;font-style:italic}.brand b{font-style:normal;color:#f6e2d5}.badge{font:10px var(--mono);border:1px solid #71523f;color:#d9bfae;padding:3px 6px}.stats{margin-left:auto;font:10px var(--mono);color:#bcc5b9}
-.lede{flex:0 0 auto;padding:20px 26px 16px;background:var(--paper2);border-bottom:1px solid var(--line)}.lede p{margin:0;max-width:1000px;font-size:17px;line-height:1.5;color:#2b332d}.lede-meta{display:flex;align-items:baseline;gap:12px;margin-top:8px}.note{font:10px var(--mono);color:var(--muted);margin:0;line-height:1.5}.describe{font:10px var(--mono);background:transparent;border:1px solid var(--line);color:var(--ink);padding:3px 8px;cursor:pointer}.describe:hover{border-color:var(--rust);color:var(--rust)}
+.lede{flex:0 0 auto;padding:20px 26px 16px;background:var(--paper2);border-bottom:1px solid var(--line)}.lede p{margin:0;max-width:1000px;font-size:17px;line-height:1.5;color:#2b332d}.lede-meta{display:flex;align-items:baseline;gap:12px;margin-top:8px}.note{font:10px var(--mono);color:var(--muted);margin:0;line-height:1.5}
 .panes{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}.pane{min-height:0;overflow:auto;padding:20px 24px 60px;background:var(--paper)}.pane+.pane{border-left:1px solid var(--line);background:var(--paper2)}.pane-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}.pane-head h2{font:11px var(--mono);margin:0;text-transform:lowercase;color:var(--rust)}.pane-sub{font:10px var(--mono);color:var(--muted)}
 .side-copy{color:#505a50;font-size:13px;margin:12px 0}.section{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.section h3{font:10px var(--mono);font-weight:600;color:var(--muted);margin:0 0 8px;text-transform:lowercase}
 .brief-item{display:block;width:100%;text-align:left;border:0;border-top:1px solid #e3e1d5;background:transparent;padding:7px 0;cursor:pointer;color:var(--ink)}.brief-item:hover{background:var(--paper3)}.brief-name{font:11px var(--mono);font-weight:600}.brief-doc{display:block;font-size:12px;color:#505a50;margin-top:2px}.carrier-meta{font:9px var(--mono);color:var(--muted)}
@@ -21,7 +21,7 @@
 <body>
 <div class="app">
 <header class="top"><div class="brand"><b>Derust</b> Project</div><span class="badge">workspace</span><div class="stats" id="stats"></div></header>
-<div class="lede"><p id="ledeText"></p><div class="lede-meta"><span class="note" id="ledeNote"></span><button class="describe" id="describe">describe</button></div></div>
+<div class="lede"><p id="ledeText"></p></div>
 <div class="panes">
   <section class="pane" id="flowPane"><div class="pane-head"><h2>flow</h2><span class="pane-sub">one normal run · steps, branches, loop</span></div><div id="flowDoc"></div></section>
   <section class="pane" id="readingPane"><div class="pane-head"><h2>reading</h2><span class="pane-sub">a suggested order through the run</span></div><div id="readingDoc"></div></section>
@@ -29,15 +29,12 @@
 </div>
 <script nonce="__NONCE__">
 const DATA = __DATA__;
-const NARRATIVE = __NARRATIVE__;
 const FLOW = __FLOW__;
 const READING = __READING__;
 let reading = READING;
 let readingError = null;
 let flow = FLOW;
 let flowError = null;
-let narrative = NARRATIVE;
-let narrativeError = null;
 const vscodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
 const stats = document.getElementById('stats');
@@ -56,28 +53,10 @@ function firstSentence(text){
   return match ? match[1] : value;
 }
 const ledeText = document.getElementById('ledeText');
-const ledeNote = document.getElementById('ledeNote');
-const describe = document.getElementById('describe');
 function renderLede(){
-  const source = narrative && narrative.text ? narrative.text : DATA.identity;
-  const line = firstSentence(source);
+  const line = firstSentence(DATA.identity);
   ledeText.textContent = line || 'No project summary is stored; run Analyze Architecture again.';
-  if(narrativeError){
-    ledeNote.textContent = narrativeError;
-  } else if(narrative && narrative.generatedAt){
-    ledeNote.textContent = 'written from the source · ' + new Date(narrative.generatedAt).toLocaleString();
-  } else {
-    ledeNote.textContent = '';
-  }
-  describe.textContent = narrative ? 'rewrite' : 'describe';
-  describe.disabled = false;
 }
-describe.addEventListener('click', ()=>{
-  if(!vscodeApi) return;
-  vscodeApi.postMessage({type:'writeNarrative'});
-  describe.textContent = 'writing…';
-  describe.disabled = true;
-});
 
 function wrapFlowTitle(title){
   const words = String(title).split(/\s+/);
@@ -330,14 +309,7 @@ function renderReading(){
 window.addEventListener('message',(event)=>{
   const message = event.data;
   if(!message || typeof message !== 'object') return;
-  if(message.type === 'narrative' && typeof message.text === 'string'){
-    narrative = { text: message.text, generatedAt: message.generatedAt };
-    narrativeError = null;
-    renderLede();
-  } else if(message.type === 'narrativeError' && typeof message.message === 'string'){
-    narrativeError = message.message;
-    renderLede();
-  } else if(message.type === 'flow' && message.flow){
+  if(message.type === 'flow' && message.flow){
     flow = message.flow; flowError = null;
     renderFlow();
   } else if(message.type === 'flowError' && typeof message.message === 'string'){

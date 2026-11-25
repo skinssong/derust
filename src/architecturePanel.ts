@@ -8,14 +8,8 @@ import { ReadingSpec } from './reading';
 
 export type ArchitectureHandlers = {
   onOpenModule: (uri: vscode.Uri) => void;
-  onWriteNarrative?: () => void;
   onWriteFlow?: () => void;
   onWriteReading?: () => void;
-};
-
-export type NarrativePayload = {
-  text: string;
-  generatedAt?: string;
 };
 
 export class ArchitecturePanel {
@@ -27,7 +21,6 @@ export class ArchitecturePanel {
     context: vscode.ExtensionContext,
     model: ArchitectureModel,
     handlers?: ArchitectureHandlers,
-    narrative?: NarrativePayload,
     flow?: FlowSpec,
     reading?: ReadingSpec
   ): void {
@@ -54,16 +47,8 @@ export class ArchitecturePanel {
 
     const panel = ArchitecturePanel.current;
     panel.title = `Derust — project — ${model.meta.crate}`;
-    panel.webview.html = render(context.extensionUri, panel.webview, model, narrative, flow, reading);
+    panel.webview.html = render(context.extensionUri, panel.webview, model, flow, reading);
     panel.reveal(vscode.ViewColumn.Active, false);
-  }
-
-  static postNarrative(narrative: NarrativePayload): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'narrative', ...narrative });
-  }
-
-  static postNarrativeError(message: string): void {
-    void ArchitecturePanel.current?.webview.postMessage({ type: 'narrativeError', message });
   }
 
   static postFlow(flow: FlowSpec): void {
@@ -87,10 +72,6 @@ export class ArchitecturePanel {
       return;
     }
     const data = message as Record<string, unknown>;
-    if (data.type === 'writeNarrative') {
-      ArchitecturePanel.handlers?.onWriteNarrative?.();
-      return;
-    }
     if (data.type === 'writeFlow') {
       ArchitecturePanel.handlers?.onWriteFlow?.();
       return;
@@ -131,7 +112,6 @@ function render(
   extensionUri: vscode.Uri,
   webview: vscode.Webview,
   model: ArchitectureModel,
-  narrative?: NarrativePayload,
   flow?: FlowSpec,
   reading?: ReadingSpec
 ): string {
@@ -144,14 +124,12 @@ function render(
     meta: model.meta,
     identity: model.brief.overview.identity
   }).replace(/<\//g, '<\\/');
-  const narrativeJson = JSON.stringify(narrative ?? null).replace(/<\//g, '<\\/');
   const flowJson = JSON.stringify(flow ?? null).replace(/<\//g, '<\\/');
   const readingJson = JSON.stringify(reading ?? null).replace(/<\//g, '<\\/');
   return template
     .replace('__CSP__', () => `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';`)
     .replace(/__NONCE__/g, () => nonce)
     .replace('__DATA__', () => data)
-    .replace('__NARRATIVE__', () => narrativeJson)
     .replace('__FLOW__', () => flowJson)
     .replace('__READING__', () => readingJson);
 }

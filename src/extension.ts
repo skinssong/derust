@@ -20,7 +20,6 @@ import { getConfig, importProviderSettings, messageOf, resolveApiKey } from './c
 import { FlowCache } from './flowCache';
 import { IndexService } from './indexService';
 import { ReadingCache } from './readingCache';
-import { NarrativeCache } from './narrativeCache';
 import { OverviewLens, OverviewService } from './overviewLens';
 import { buildProfileCandidates } from './profile';
 import { ReaderPanel } from './panel';
@@ -28,7 +27,6 @@ import { crateRoot, readCrateName } from './project';
 import { completeJson, completeJsonRepair, ProviderSettings } from './provider';
 import { buildFlowInput, extractJsonObject, FLOW_SYSTEM_PROMPT, linkFlowSources, parseFlowText } from './flow';
 import { buildReadingInput, parseReading, READING_SYSTEM_PROMPT } from './reading';
-import { buildNarrativeInput, NARRATIVE_SYSTEM_PROMPT } from './projectNarrative';
 import { PROMPT_VERSION } from './schema';
 
 type Current = {
@@ -54,7 +52,6 @@ let current: Current | undefined;
 let overviewLens: OverviewLens | undefined;
 let indexService: IndexService;
 let architectureService: ArchitectureService;
-let narrativeCache: NarrativeCache;
 let flowCache: FlowCache;
 let readingCache: ReadingCache;
 let architectureModel: ArchitectureModel | undefined;
@@ -93,7 +90,6 @@ export function activate(context: vscode.ExtensionContext): void {
   overviewLens = new OverviewLens();
   indexService = new IndexService(context, overviewService, output);
   architectureService = new ArchitectureService(context, overviewService, output);
-  narrativeCache = new NarrativeCache(context);
   flowCache = new FlowCache(context);
   readingCache = new ReadingCache(context);
 
@@ -238,23 +234,6 @@ async function analyzeWorkspace(): Promise<void> {
 
   const uris = await findRustFiles(root);
   await chooseAndAnalyze(uris);
-}
-
-function parseNarrative(text: string): string | undefined {
-  const cleaned = text
-    .trim()
-    .replace(/^```[a-zA-Z]*\s*\n?/, '')
-    .replace(/\n?```\s*$/, '')
-    .trim();
-  try {
-    const value = JSON.parse(cleaned) as Record<string, unknown>;
-    if (value && typeof value.narrative === 'string' && value.narrative.trim()) {
-      return value.narrative.trim();
-    }
-  } catch {
-    // Fall through to the raw text.
-  }
-  return cleaned ? cleaned.slice(0, 4000) : undefined;
 }
 
 function responseSnippet(text: string): string {
@@ -430,89 +409,6 @@ async function writeFlow(): Promise<void> {
   }
 }
 
-async function writeProjectNarrative(): Promise<void> {
-  const model = architectureModel;
-  if (!model) {
-    ArchitecturePanel.postNarrativeError('Run Derust: Analyze Architecture first.');
-    return;
-  }
-  const config = getConfig();
-  if (!config.baseUrl || !config.model) {
-    ArchitecturePanel.postNarrativeError(
-      'Set derust.baseUrl and derust.model first, or import provider settings.'
-    );
-    return;
-  }
-  const apiKey = await ensureApiKey();
-  if (!apiKey) {
-    ArchitecturePanel.postNarrativeError(
-      'No API key configured. Run Derust: Import Provider Settings from .env.'
-    );
-    return;
-  }
-
-  const settings: ProviderSettings = {
-    baseUrl: config.baseUrl,
-    model: config.model,
-    apiKey,
-    jsonMode: config.jsonMode,
-    timeoutMs: config.timeoutSeconds * 1000,
-    maxTokens: Math.min(config.maxOutputTokens, 2000),
-    reasoningEffort: config.reasoningEffort === 'none' ? 'none' : 'low',
-    userAgent: `derust/${contextRef.extension.packageJSON.version}`
-  };
-
-  try {
-    const result = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `Derust — ${model.meta.crate} narrative`,
-        cancellable: true
-      },
-      async (progress, token) => {
-        progress.report({ message: 'Writing project narrative…' });
-        const controller = new AbortController();
-        token.onCancellationRequested(() => controller.abort());
-        return completeJson(
-          NARRATIVE_SYSTEM_PROMPT,
-          buildNarrativeInput(model),
-          settings,
-          controller.signal
-        );
-      }
-    );
-    let narrative = parseNarrative(result.text);
-    let last = result;
-    if (!narrative) {
-      output.appendLine(
-        `[architecture] narrative raw (finish=${result.finishReason ?? '?'}, usage=${JSON.stringify(result.usage ?? null)}): ${result.text.replace(/\s+/g, ' ').slice(0, 4000)}`
-      );
-      last = await completeJsonRepair(NARRATIVE_SYSTEM_PROMPT, buildNarrativeInput(model), result.text, settings);
-      narrative = parseNarrative(last.text);
-      if (!narrative) {
-        output.appendLine(
-          `[architecture] narrative retry raw (finish=${last.finishReason ?? '?'}, usage=${JSON.stringify(last.usage ?? null)}): ${last.text.replace(/\s+/g, ' ').slice(0, 4000)}`
-        );
-      }
-    }
-    if (!narrative) {
-      throw new Error(
-        `The provider returned no narrative. Response began: “${responseSnippet(last.text)}”`
-      );
-    }
-    const generatedAt = new Date().toISOString();
-    narrativeCache.write(
-      model.meta.root,
-      narrativeCache.key(model.meta.revision, config.model),
-      { narrative, model: config.model, revision: model.meta.revision, generatedAt }
-    );
-    ArchitecturePanel.postNarrative({ text: narrative, generatedAt });
-  } catch (error) {
-    output.appendLine(`[architecture] narrative: ${messageOf(error)}`);
-    ArchitecturePanel.postNarrativeError(messageOf(error));
-  }
-}
-
 async function openModuleFromArchitecture(uri: vscode.Uri): Promise<void> {
   try {
     const document = await vscode.workspace.openTextDocument(uri);
@@ -553,12 +449,6 @@ async function analyzeArchitecture(): Promise<void> {
     }
     architectureModel = model;
     const config = getConfig();
-    const cachedNarrative = config.model
-      ? narrativeCache.read(
-          model.meta.root,
-          narrativeCache.key(model.meta.revision, config.model)
-        )
-      : undefined;
     const cachedFlow = config.model
       ? flowCache.read(model.meta.root, flowCache.key(model.meta.revision, config.model))
       : undefined;
@@ -575,9 +465,6 @@ async function analyzeArchitecture(): Promise<void> {
         onOpenModule: (uri) => {
           void openModuleFromArchitecture(uri);
         },
-        onWriteNarrative: () => {
-          void writeProjectNarrative();
-        },
         onWriteFlow: () => {
           void writeFlow();
         },
@@ -585,9 +472,6 @@ async function analyzeArchitecture(): Promise<void> {
           void writeReading();
         }
       },
-      cachedNarrative
-        ? { text: cachedNarrative.narrative, generatedAt: cachedNarrative.generatedAt }
-        : undefined,
       cachedFlow,
       cachedReading
     );
