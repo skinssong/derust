@@ -58,7 +58,7 @@ work in the same panel.*
 From the Marketplace, search for **Derust**, or install the local VSIX:
 
 ```bash
-code --install-extension release/derust-0.9.0.vsix
+code --install-extension release/derust-0.10.0.vsix
 ```
 
 For development, open this folder in VS Code and press `F5`.

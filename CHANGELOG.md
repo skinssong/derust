@@ -2,7 +2,7 @@
 
 All notable changes to Derust are recorded here.
 
-## [0.9.0] — 2026-11-25
+## [0.10.0] — 2026-11-25
 
 Derust now explains a project as well as a file, in one panel. This release adds
 the crate-level project view, unifies the two webviews, and starts the AI work
